@@ -11,6 +11,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { signIn } from 'next-auth/react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth-store';
 import { DEMO_ACCOUNTS, DEMO_PASSWORD } from '@/lib/constants';
@@ -22,6 +23,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSsoLoading, setIsSsoLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +47,11 @@ export default function LoginPage() {
     login(demoEmail);
     toast.success('Signed in');
     setTimeout(() => router.push('/dashboard'), 200);
+  };
+
+  const handleMicrosoftSignIn = async () => {
+    setIsSsoLoading(true);
+    await signIn('microsoft-entra-id', { callbackUrl: '/auth/complete' });
   };
 
   const roleAccounts = [
@@ -113,7 +120,8 @@ export default function LoginPage() {
           <div style={{ marginBottom: '18px' }}>
             <button
               type="button"
-              onClick={() => quickLogin(DEMO_ACCOUNTS[0].email)}
+              onClick={handleMicrosoftSignIn}
+              disabled={isSsoLoading}
               className="w-full flex items-center justify-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-white text-[14px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-wash)] transition-colors shadow-sm"
               style={{ height: '44px' }}
             >
@@ -123,7 +131,7 @@ export default function LoginPage() {
                 <path d="M11 12H0V23H11V12Z" fill="#00A4EF" />
                 <path d="M23 12H12V23H23V12Z" fill="#FFB900" />
               </svg>
-              Continue with Microsoft Entra ID
+              {isSsoLoading ? 'Opening Microsoft sign-in...' : 'Continue with Microsoft Entra ID'}
             </button>
           </div>
 

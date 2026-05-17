@@ -27,6 +27,8 @@ interface AuthState {
   isAuthenticated: boolean;
   /** Login with email (demo mode — no password verification) */
   login: (email: string) => boolean;
+  /** Hydrate from a production SSO session */
+  setExternalUser: (user: DemoUser) => void;
   /** Switch role for demo purposes (instant role switch dropdown) */
   switchUser: (userId: string) => void;
   /** Log out */
@@ -60,6 +62,13 @@ export const useAuthStore = create<AuthState>()(
           return true;
         }
         return false;
+      },
+
+      setExternalUser: (user: DemoUser) => {
+        set({
+          user,
+          isAuthenticated: true,
+        });
       },
 
       switchUser: (userId: string) => {
