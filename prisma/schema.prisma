@@ -1,0 +1,271 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  EMPLOYEE
+  MANAGER
+  ADMIN
+}
+
+enum GoalStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  LOCKED
+  RETURNED
+}
+
+enum UomType {
+  NUMERIC_MIN
+  NUMERIC_MAX
+  PERCENTAGE_MIN
+  PERCENTAGE_MAX
+  TIMELINE
+  ZERO_BASED
+}
+
+enum ProgressStatus {
+  NOT_STARTED
+  ON_TRACK
+  COMPLETED
+}
+
+enum Quarter {
+  Q1
+  Q2
+  Q3
+  Q4
+}
+
+model User {
+  id            String      @id @default(cuid())
+  email         String      @unique
+  fullName      String
+  role          UserRole
+  department    String
+  managerId     String?
+  manager       User?       @relation("OrgTree", fields: [managerId], references: [id])
+  teamMembers   User[]      @relation("OrgTree")
+  azureObjectId String?     @unique
+  tenantId      String?
+  lastSyncedAt  DateTime?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  sheets        GoalSheet[]
+
+  @@index([role])
+  @@index([managerId])
+  @@index([department])
+  @@index([tenantId, azureObjectId])
+}
+
+model GoalCycle {
+  id        String      @id @default(cuid())
+  name      String
+  year      Int
+  startsAt  DateTime
+  endsAt    DateTime
+  isActive  Boolean     @default(false)
+  config    Json
+  createdAt DateTime    @default(now())
+  sheets    GoalSheet[]
+
+  @@index([isActive])
+  @@unique([year, name])
+}
+
+model ThrustArea {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  isActive    Boolean @default(true)
+  goals       Goal[]
+}
+
+model GoalSheet {
+  id             String             @id @default(cuid())
+  employeeId     String
+  cycleId        String
+  status         GoalStatus         @default(DRAFT)
+  submittedAt    DateTime?
+  approvedAt     DateTime?
+  approvedBy     String?
+  returnedAt     DateTime?
+  returnedReason String?
+  lockedAt       DateTime?
+  version        Int                @default(1)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  employee       User               @relation(fields: [employeeId], references: [id])
+  cycle          GoalCycle          @relation(fields: [cycleId], references: [id])
+  goals          Goal[]
+  managerReviews ManagerCheckin[]
+
+  @@unique([employeeId, cycleId])
+  @@index([cycleId, status])
+  @@index([employeeId])
+}
+
+model Goal {
+  id           String            @id @default(cuid())
+  sheetId      String
+  thrustAreaId String
+  title        String
+  description  String?
+  uomType      UomType
+  target       Decimal           @db.Decimal(18, 4)
+  targetDate   DateTime?
+  weightage    Int
+  isShared     Boolean           @default(false)
+  sharedFromId String?
+  isOwner      Boolean           @default(true)
+  displayOrder Int
+  version      Int               @default(1)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  sheet        GoalSheet         @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  thrustArea   ThrustArea        @relation(fields: [thrustAreaId], references: [id])
+  updates      QuarterlyUpdate[]
+
+  @@index([sheetId])
+  @@index([sharedFromId])
+  @@index([thrustAreaId])
+}
+
+model QuarterlyUpdate {
+  id                String         @id @default(cuid())
+  goalId            String
+  quarter           Quarter
+  cycleId           String
+  actualAchievement Decimal?       @db.Decimal(18, 4)
+  completionDate    DateTime?
+  status            ProgressStatus
+  computedScore     Decimal?       @db.Decimal(10, 6)
+  notes             String?
+  updatedBy         String
+  version           Int            @default(1)
+  updatedAt         DateTime       @updatedAt
+  goal              Goal           @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@unique([goalId, quarter, cycleId])
+  @@index([cycleId, quarter])
+}
+
+model ManagerCheckin {
+  id          String    @id @default(cuid())
+  managerId   String
+  employeeId  String
+  sheetId     String?
+  quarter     Quarter
+  cycleId     String
+  comment     String
+  completedAt DateTime  @default(now())
+  sheet       GoalSheet? @relation(fields: [sheetId], references: [id])
+
+  @@unique([employeeId, quarter, cycleId])
+  @@index([managerId, quarter])
+}
+
+model NotificationEvent {
+  id            String    @id @default(cuid())
+  type          String
+  recipientId   String
+  title         String
+  message       String
+  deepLink      String
+  teamsCardJson Json
+  createdAt     DateTime  @default(now())
+  readAt        DateTime?
+  deliveryState String    @default("PENDING")
+  deliveredAt   DateTime?
+  failureReason String?
+
+  @@index([recipientId, readAt])
+  @@index([deliveryState, createdAt])
+}
+
+model ApiIdempotencyKey {
+  id             String   @id @default(cuid())
+  key            String   @unique
+  actorId        String
+  operation      String
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@index([actorId, operation])
+  @@index([expiresAt])
+}
+
+model OutboxEvent {
+  id             String    @id @default(cuid())
+  type           String
+  aggregateType  String
+  aggregateId    String
+  payload        Json
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now())
+  processedAt    DateTime?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+
+  @@index([status, nextAttemptAt])
+  @@index([aggregateType, aggregateId])
+}
+
+model IntegrationSyncRun {
+  id             String    @id @default(cuid())
+  provider       String
+  syncType       String
+  status         String
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  recordsScanned Int       @default(0)
+  recordsChanged Int       @default(0)
+  errorMessage   String?
+  triggeredBy    String?
+
+  @@index([provider, syncType, startedAt])
+}
+
+model EscalationEvent {
+  id             String    @id @default(cuid())
+  ruleId         String
+  targetUserId   String
+  notifiedUserId String
+  level          String
+  triggeredAt    DateTime  @default(now())
+  resolvedAt     DateTime?
+  resolvedBy     String?
+  resolutionNote String?
+
+  @@index([targetUserId, triggeredAt])
+  @@index([notifiedUserId, resolvedAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  action     String
+  fieldName  String?
+  oldValue   Json?
+  newValue   Json?
+  changedBy  String
+  changedAt  DateTime @default(now())
+  ipAddress  String?
+  userAgent  String?
+
+  @@index([entityType, entityId])
+  @@index([changedAt])
+}
