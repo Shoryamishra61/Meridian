@@ -1,5 +1,4 @@
 import NextAuth from 'next-auth';
-import MicrosoftEntraID from 'next-auth/providers/microsoft-entra-id';
 import type { MicrosoftEntraIDProfile } from 'next-auth/providers/microsoft-entra-id';
 import { USER_ROLES } from '@/lib/constants';
 import { resolveRoleFromEntraClaims } from '@/server/auth/role-mapping';
@@ -10,10 +9,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   session: { strategy: 'jwt' },
   providers: [
-    MicrosoftEntraID({
+    {
+      id: 'microsoft-entra-id',
+      name: 'Microsoft Entra ID',
+      type: 'oidc',
       clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
       clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
       issuer: entraIssuer,
+      wellKnown: entraIssuer ? `${entraIssuer}/.well-known/openid-configuration` : undefined,
+      authorization: { params: { scope: 'openid profile email User.Read' } },
       profile(profile: MicrosoftEntraIDProfile) {
         return {
           id: profile.oid ?? profile.sub,
@@ -22,7 +26,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           image: null,
         };
       },
-    }),
+    },
   ],
   callbacks: {
     jwt({ token, profile }) {
