@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "quality:gates": "node scripts/quality-gates.mjs",
     "test:smoke": "node scripts/api-smoke.mjs",
+    "test:atomquest": "node scripts/atomquest-verification.mjs",
     "test:production-gates": "npm run lint && npm run typecheck && npm run quality:gates && npm run build"
   },
   "dependencies": {
