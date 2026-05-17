@@ -4,6 +4,8 @@ import type { MicrosoftEntraIDProfile } from 'next-auth/providers/microsoft-entr
 import { USER_ROLES } from '@/lib/constants';
 import { resolveRoleFromEntraClaims } from '@/server/auth/role-mapping';
 
+const entraIssuer = process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER?.replace(/\/$/, '');
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   session: { strategy: 'jwt' },
@@ -11,7 +13,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     MicrosoftEntraID({
       clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
       clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
-      issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+      issuer: entraIssuer,
       profile(profile: MicrosoftEntraIDProfile) {
         return {
           id: profile.oid ?? profile.sub,
