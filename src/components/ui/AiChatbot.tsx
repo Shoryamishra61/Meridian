@@ -164,7 +164,7 @@ export default function AiChatbot() {
             : user.role === 'MANAGER'
               ? DEMO_ACCOUNTS.filter((a) => a.managerId === user.id)
               : DEMO_ACCOUNTS.filter((a) => a.id === user.id);
-        const empIds = new Set(employees.map((e) => e.id));
+        const empIds: Set<string> = new Set(employees.map((e) => e.id));
         const scopedSheets = goalSheets.filter(
           (s) => empIds.has(s.employeeId) && s.cycleId === activeCycle?.id
         );
