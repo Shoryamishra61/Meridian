@@ -4,11 +4,8 @@ const nextConfig: NextConfig = {
   // Enable React strict mode for better dev experience
   reactStrictMode: true,
 
-  // Disable Next.js development indicators (the floating 'N' logo)
-  devIndicators: {
-    appIsrStatus: false,
-    buildActivity: false,
-  },
+  // Disable Next.js development indicators
+  devIndicators: false,
 
   // Compress responses with gzip/brotli
   compress: true,
