@@ -224,57 +224,130 @@ Meridian follows a \textbf{layered monolith} architecture organized into five ti
 \subsection{Underlying Architecture Diagram (Secondary)}
 
 \begin{center}
+\resizebox{\textwidth}{!}{
 \begin{tikzpicture}[
-    node distance=0.5cm,
-    layer/.style={draw=border, fill=surface, rounded corners=2pt, minimum width=14.5cm, minimum height=2cm, align=center},
-    svc/.style={draw=brand!50, fill=brandlight, rounded corners=2pt, minimum width=4cm, minimum height=1cm, align=center, font=\small},
-    lbl/.style={font=\footnotesize\bfseries\color{brand}, anchor=west},
-    arr/.style={-{Stealth[length=5pt]}, thick, color=textsecondary}
+    x=1cm, y=-1cm,
+    layer_bg/.style={draw=border, fill=white, rounded corners=4pt},
+    lbl_num/.style={font=\sffamily\Large\bfseries},
+    lbl_text/.style={font=\sffamily\tiny\bfseries\color{textsecondary}, align=center},
+    % Colors matching layers in image
+    c1/.style={color=textprimary},
+    c2/.style={color=red!60},
+    c3/.style={color=green!60},
+    c4/.style={color=blue!60},
+    c5/.style={color=purple!60},
+    c6/.style={color=orange!60},
+    c7/.style={color=cyan!60},
+    c8/.style={color=teal!60},
+    c9/.style={color=magenta!60},
+    c10/.style={color=gray!60},
+    
+    b1/.style={draw=border, fill=surface, rounded corners=3pt, align=left, inner sep=6pt, text width=#1},
+    b2/.style={draw=red!40, fill=red!5, rounded corners=3pt, align=left, inner sep=6pt, text width=#1},
+    b3/.style={draw=green!40, fill=green!5, rounded corners=3pt, align=left, inner sep=6pt, text width=#1},
+    b4/.style={draw=blue!40, fill=blue!5, rounded corners=3pt, align=left, inner sep=6pt, text width=#1},
+    b5/.style={draw=purple!40, fill=purple!5, rounded corners=3pt, align=left, inner sep=6pt, text width=#1},
+    b6/.style={draw=orange!40, fill=orange!5, rounded corners=3pt, align=left, inner sep=6pt, text width=#1},
+    b7/.style={draw=cyan!40, fill=cyan!5, rounded corners=3pt, align=left, inner sep=6pt, text width=#1},
+    b8/.style={draw=teal!40, fill=teal!5, rounded corners=3pt, align=left, inner sep=6pt, text width=#1},
+    b9/.style={draw=magenta!40, fill=magenta!5, rounded corners=3pt, align=left, inner sep=6pt, text width=#1},
+    b10/.style={draw=gray!40, fill=gray!5, rounded corners=3pt, align=left, inner sep=6pt, text width=#1}
 ]
 
-% L1
-\node[layer] (L1) {};
-\node[lbl] at ([xshift=6pt, yshift=-6pt]L1.north west) {LAYER 1 — CLIENT};
-\node[svc] (s1a) at ([xshift=-4.2cm]L1.center) {Next.js 16\\App Router};
-\node[svc] (s1b) at (L1.center) {React 19 SPA\\TypeScript (strict)};
-\node[svc] (s1c) at ([xshift=4.2cm]L1.center) {Teams Adaptive\\Card Preview};
+\def\w{25} % total width
+\def\lx{1.8} % layer start x
 
-% L2
-\node[layer, below=of L1] (L2) {};
-\node[lbl] at ([xshift=6pt, yshift=-6pt]L2.north west) {LAYER 2 — EDGE \& API GATEWAY};
-\node[svc] (s2a) at ([xshift=-4.2cm]L2.center) {Vercel CDN\\Static + ISR};
-\node[svc] (s2b) at (L2.center) {Middleware\\Auth + RBAC};
-\node[svc] (s2c) at ([xshift=4.2cm]L2.center) {Rate Limiter\\+ Idempotency};
+% Layer 1: USERS
+\draw[layer_bg] (\lx, 0) rectangle (\w, 1.8);
+\node[lbl_num, c1] at (0.9, 0.7) {1};
+\node[lbl_text] at (0.9, 1.3) {USERS};
+\node[b1=6.5cm] at (\lx+3.8, 0.9) {\textbf{Employee}\\Goal creation $\cdot$ Quarterly check-ins};
+\node[b1=6.5cm] at (\lx+11.2, 0.9) {\textbf{Manager (L1)}\\Team approval $\cdot$ Structured review};
+\node[b1=6.5cm] at (\lx+18.6, 0.9) {\textbf{Admin / HR}\\Org config $\cdot$ Audit $\cdot$ Escalations};
 
-% L3
-\node[layer, below=of L2, minimum height=2.6cm] (L3) {};
-\node[lbl] at ([xshift=6pt, yshift=-6pt]L3.north west) {LAYER 3 — APPLICATION CORE};
-\node[svc] (s3a) at ([xshift=-4.2cm, yshift=0.2cm]L3.center) {Goal Management\\Service};
-\node[svc] (s3b) at ([yshift=0.2cm]L3.center) {Escalation\\Engine};
-\node[svc] (s3c) at ([xshift=4.2cm, yshift=0.2cm]L3.center) {Notification\\Service};
-\node[svc, minimum width=13cm, minimum height=0.6cm, fill=brand!8, font=\footnotesize] (zod) at ([yshift=-0.85cm]L3.center) {Zod Validation Layer — Schema enforcement $\cdot$ Business rules $\cdot$ UoM math};
+% Layer 2: SECURITY
+\draw[layer_bg] (\lx, 2.2) rectangle (\w, 4.0);
+\node[lbl_num, c2] at (0.9, 2.9) {2};
+\node[lbl_text] at (0.9, 3.5) {SECURITY};
+\node[b2=3.8cm] at (\lx+2.3, 3.1) {\textbf{Edge Middleware}\\HSTS $\cdot$ CSP};
+\node[b2=3.8cm] at (\lx+6.9, 3.1) {\textbf{Rate Limiter}\\60 req/min per IP};
+\node[b2=3.8cm] at (\lx+11.5, 3.1) {\textbf{Idempotency Guard}\\SHA-256 dedup};
+\node[b2=3.8cm] at (\lx+16.1, 3.1) {\textbf{Route Guard}\\RBAC redirect};
+\node[b2=3.8cm] at (\lx+20.7, 3.1) {\textbf{JWT Validator}\\HttpOnly cookie};
 
-% L4
-\node[layer, below=of L3] (L4) {};
-\node[lbl] at ([xshift=6pt, yshift=-6pt]L4.north west) {LAYER 4 — DATA \& STATE};
-\node[svc] (s4a) at ([xshift=-4.2cm]L4.center) {Zustand Store\\(Demo Mode)};
-\node[svc] (s4b) at (L4.center) {PostgreSQL\\Prisma ORM};
-\node[svc] (s4c) at ([xshift=4.2cm]L4.center) {Redis Cache\\(Production)};
+% Layer 3: FRONTEND
+\draw[layer_bg] (\lx, 4.4) rectangle (\w, 9.4);
+\node[lbl_num, c3] at (0.9, 6.7) {3};
+\node[lbl_text] at (0.9, 7.3) {FRONTEND};
+\node[b3=22.2cm] at (\lx+11.6, 5.3) {\textbf{Next.js 16 App Router}\\SSR + CSR $\cdot$ Turbopack $\cdot$ TypeScript 5 Strict $\cdot$ React 19 $\cdot$ Zod validation};
+\node[b3=5.5cm] at (\lx+3.25, 7.0) {\textbf{Zustand Auth Store}\\Session $\cdot$ Role switch};
+\node[b3=5.5cm] at (\lx+3.25, 8.4) {\textbf{Zustand Data Store}\\Goals $\cdot$ Sheets $\cdot$ Check-ins};
+\node[b3=11.5cm] at (\lx+12.25, 7.0) {\textbf{UI Components}\\WeightageTracker $\cdot$ GoalCompletionRing $\cdot$ GoalCreateDialog};
+\node[b3=11.5cm] at (\lx+12.25, 8.4) {\textbf{Performance \& Recovery}\\Error Boundary $\cdot$ Lazy Loading $\cdot$ CycleWindowsCard};
+\node[b6=4cm, align=center] at (\lx+20.5, 7.7) {\textbf{AI Goal Coach}\\Client-side $\cdot$ Zero API cost\\\$0 $\cdot$ Pattern-matched};
 
-% L5
-\node[layer, below=of L4] (L5) {};
-\node[lbl] at ([xshift=6pt, yshift=-6pt]L5.north west) {LAYER 5 — ANALYTICS \& AUDIT};
-\node[svc] (s5a) at ([xshift=-4.2cm]L5.center) {Calculation Engine\\4 UoM Types};
-\node[svc] (s5b) at (L5.center) {Immutable\\Audit Trail};
-\node[svc] (s5c) at ([xshift=4.2cm]L5.center) {8 Analytics\\Panels (Recharts)};
+% Layer 4: API
+\draw[layer_bg] (\lx, 9.8) rectangle (\w, 11.6);
+\node[lbl_num, c4] at (0.9, 10.5) {4};
+\node[lbl_text] at (0.9, 11.1) {API};
+\node[b4=4.0cm] at (\lx+2.4, 10.7) {\textbf{Goal Validation API}\\POST /api/goals/validate};
+\node[b4=4.0cm] at (\lx+7.0, 10.7) {\textbf{Auth Handlers}\\GET|POST /api/auth};
+\node[b4=4.0cm] at (\lx+11.6, 10.7) {\textbf{Entra Sync API}\\GET /api/integrations};
+\node[b4=4.0cm] at (\lx+16.2, 10.7) {\textbf{Teams Dispatch}\\POST /api/teams-card};
+\node[b4=4.0cm] at (\lx+20.8, 10.7) {\textbf{Health Check}\\GET /api/health};
 
-% Arrows
-\draw[arr] (L1.south) -- (L2.north);
-\draw[arr] (L2.south) -- (L3.north);
-\draw[arr] (L3.south) -- (L4.north);
-\draw[arr] (L4.south) -- (L5.north);
+% Layer 5: DOMAIN
+\draw[layer_bg] (\lx, 12.0) rectangle (\w, 13.8);
+\node[lbl_num, c5] at (0.9, 12.7) {5};
+\node[lbl_text] at (0.9, 13.3) {DOMAIN};
+\node[b5=4.8cm] at (\lx+2.8, 12.9) {\textbf{Goal Policy Engine}\\8 BRD validators $\cdot$ weight = 100\%};
+\node[b5=4.8cm] at (\lx+8.2, 12.9) {\textbf{Score Calculator}\\4 UoM formulas};
+\node[b5=4.8cm] at (\lx+13.6, 12.9) {\textbf{Input Sanitizer}\\XSS strip $\cdot$ CSV defense};
+\node[b5=4.8cm] at (\lx+19.0, 12.9) {\textbf{Authorization Matrix}\\10 permissions $\times$ 3 roles};
+
+% Layer 6: AI
+\draw[layer_bg] (\lx, 14.2) rectangle (\w, 16.0);
+\node[lbl_num, c6] at (0.9, 14.9) {6};
+\node[lbl_text] at (0.9, 15.5) {AI};
+\node[b6=22.2cm, align=center] at (\lx+11.6, 15.1) {\textbf{13 Agents $\cdot$ Client-Side Only $\cdot$ \$0 API Cost $\cdot$ No LLM Inference}\\Completion Predictor $\cdot$ Anomaly Detector $\cdot$ Goal Suggester $\cdot$ SMART Scorer $\cdot$ Overlap Detector $\cdot$ Thrust Tagger $\cdot$ Sentiment Analyzer\\\quad$\cdot$ Comment Analyzer $\cdot$ Talking Points $\cdot$ Chatbot Engine $\cdot$ Analytics Sum. $\cdot$ Weightage Rec. $\cdot$ Insights Generator};
+
+% Layer 7: AUTH
+\draw[layer_bg] (\lx, 16.4) rectangle (\w, 18.2);
+\node[lbl_num, c7] at (0.9, 17.1) {7};
+\node[lbl_text] at (0.9, 17.7) {AUTH};
+\node[b7=6.5cm] at (\lx+3.8, 17.3) {\textbf{NextAuth v5}\\JWT $\cdot$ HttpOnly cookie $\cdot$ Refresh};
+\node[b7=6.5cm] at (\lx+11.2, 17.3) {\textbf{Microsoft Entra ID}\\OIDC redirect $\cdot$ OAuth2 Flow};
+\node[b7=6.5cm] at (\lx+18.6, 17.3) {\textbf{Role Mapping Engine}\\App roles $\rightarrow$ Admin/Manager/Emp};
+
+% Layer 8: DATABASE
+\draw[layer_bg] (\lx, 18.6) rectangle (\w, 20.4);
+\node[lbl_num, c8] at (0.9, 19.3) {8};
+\node[lbl_text] at (0.9, 19.9) {DATABASE};
+\node[b8=5.2cm] at (\lx+3.1, 19.5) {\textbf{PostgreSQL / Supabase}\\15 tables $\cdot$ PgBouncer};
+\node[b8=4.5cm] at (\lx+8.5, 19.5) {\textbf{Prisma ORM 7.8}\\Type-safe queries};
+\node[b8=4.5cm] at (\lx+13.5, 19.5) {\textbf{Audit Log (Immutable)}\\APPEND-ONLY};
+\node[b3=5.2cm] at (\lx+19.0, 19.5) {\textbf{Zustand localStorage}\\DEMO MODE};
+
+% Layer 9: INTEGRATIONS
+\draw[layer_bg] (\lx, 20.8) rectangle (\w, 22.6);
+\node[lbl_num, c9] at (0.9, 21.5) {9};
+\node[lbl_text] at (0.9, 22.1) {INTEGRATIONS};
+\node[b9=4.8cm] at (\lx+2.8, 21.7) {\textbf{Resend Email}\\Submissions $\cdot$ Approvals};
+\node[b9=4.8cm] at (\lx+8.2, 21.7) {\textbf{Microsoft Teams}\\Adaptive Cards v1.4};
+\node[b9=4.8cm] at (\lx+13.6, 21.7) {\textbf{Microsoft Graph API}\\Org hierarchy sync};
+\node[b9=4.8cm] at (\lx+19.0, 21.7) {\textbf{Outbox Event Queue}\\Reliable async dispatch};
+
+% Layer 10: INFRA
+\draw[layer_bg] (\lx, 23.0) rectangle (\w, 24.8);
+\node[lbl_num, c10] at (0.9, 23.7) {10};
+\node[lbl_text] at (0.9, 24.3) {INFRA};
+\node[b10=4.8cm] at (\lx+2.8, 23.9) {\textbf{Vercel Edge Network}\\Serverless $\cdot$ CDN};
+\node[b10=4.8cm] at (\lx+8.2, 23.9) {\textbf{PWA / Service Worker}\\Offline-first};
+\node[b10=4.8cm] at (\lx+13.6, 23.9) {\textbf{XLSX Export}\\Browser-side Blob};
+\node[b3=4.8cm, align=center] at (\lx+19.0, 23.9) {\textbf{MONTHLY COST}\\\textbf{Total \$0 [FREE]}};
 
 \end{tikzpicture}
+}
 \end{center}
 
 \vspace{12pt}
