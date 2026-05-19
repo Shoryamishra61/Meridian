@@ -5,18 +5,36 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth-store';
 import { useDataStore } from '@/stores/data-store';
 import { BUSINESS_RULES, DEMO_ACCOUNTS, UOM_LABELS, type UoMType } from '@/lib/constants';
-import { cn } from '@/lib/utils';
+import { sanitizeTextInput } from '@/lib/sanitize';
 
 export default function SharedGoalsPage() {
   const user = useAuthStore((state) => state.user)!;
   const { addAuditLog, addGoal, addNotification, cycles, getOrCreateSheet, goals, goalSheets, thrustAreas } = useDataStore();
   const activeCycle = cycles.find((cycle) => cycle.isActive);
-  const employees = DEMO_ACCOUNTS.filter((account) => account.role === 'EMPLOYEE');
+
+  /**
+   * Recipient pool scoped by role:
+   * - ADMIN can push to anyone in the org.
+   * - MANAGER can push only to their direct reports.
+   * Prevents managers from cross-pushing KPIs to other teams' employees.
+   */
+  const employees = useMemo(() => {
+    if (user.role === 'ADMIN') {
+      return DEMO_ACCOUNTS.filter((account) => account.role === 'EMPLOYEE');
+    }
+    return DEMO_ACCOUNTS.filter(
+      (account) => account.role === 'EMPLOYEE' && account.managerId === user.id
+    );
+  }, [user.id, user.role]);
+
+  const recipientScopeLabel =
+    user.role === 'ADMIN' ? 'All employees' : 'Your direct reports';
 
   const [showForm, setShowForm] = useState(false);
   const [thrustAreaId, setThrustAreaId] = useState('');
@@ -28,9 +46,27 @@ export default function SharedGoalsPage() {
   const [defaultWeightage, setDefaultWeightage] = useState('20');
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
 
-  const sharedGroups = [...new Set(goals.filter((goal) => goal.isShared).map((goal) => goal.sharedFromId))].filter(
-    (groupId): groupId is string => Boolean(groupId)
-  );
+  /**
+   * Visible shared-goal groups, scoped by viewer role.
+   * Admins see all org-wide shared KPIs. Managers see groups in which at least
+   * one of their direct reports is a recipient.
+   */
+  const sharedGroups = useMemo(() => {
+    const allowedEmployeeIds = new Set<string>(employees.map((employee) => employee.id));
+    const groupIds = new Set<string>();
+    goals.forEach((goal) => {
+      if (!goal.isShared || !goal.sharedFromId) return;
+      if (user.role === 'ADMIN') {
+        groupIds.add(goal.sharedFromId);
+        return;
+      }
+      const sheet = goalSheets.find((candidate) => candidate.id === goal.sheetId);
+      if (sheet && allowedEmployeeIds.has(sheet.employeeId)) {
+        groupIds.add(goal.sharedFromId);
+      }
+    });
+    return Array.from(groupIds);
+  }, [goals, goalSheets, employees, user.role]);
 
   const toggleEmployee = (employeeId: string) => {
     setSelectedEmployees((previous) =>
@@ -47,6 +83,15 @@ export default function SharedGoalsPage() {
       toast.error('Complete the shared goal fields and select recipients.');
       return;
     }
+    // Defense in depth: verify all selected recipients are in the allowed scope.
+    const allowedIds = new Set<string>(employees.map((employee) => employee.id));
+    const outOfScope = selectedEmployees.filter((id) => !allowedIds.has(id));
+    if (outOfScope.length > 0) {
+      toast.error('Some recipients are outside your authorized scope', {
+        description: 'Managers can only push shared goals to their direct reports.',
+      });
+      return;
+    }
     if (uomType === 'TIMELINE' && !targetDate) {
       toast.error('Timeline goals require a deadline.');
       return;
@@ -57,6 +102,13 @@ export default function SharedGoalsPage() {
     }
     if (weightage < BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL) {
       toast.error(`Minimum weightage is ${BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL}%.`);
+      return;
+    }
+
+    const cleanTitle = sanitizeTextInput(title);
+    const cleanDescription = description.trim() ? sanitizeTextInput(description) : null;
+    if (!cleanTitle.trim()) {
+      toast.error('Goal title is required after sanitization.');
       return;
     }
 
@@ -83,8 +135,8 @@ export default function SharedGoalsPage() {
         addGoal({
           sheetId: sheet.id,
           thrustAreaId,
-          title: title.trim(),
-          description: description.trim() || null,
+          title: cleanTitle,
+          description: cleanDescription,
           uomType,
           target: uomType === 'ZERO_BASED' || uomType === 'TIMELINE' ? 0 : Number(target),
           targetDate: uomType === 'TIMELINE' ? new Date(targetDate) : null,
@@ -106,8 +158,8 @@ export default function SharedGoalsPage() {
         title: 'Shared goal assigned',
         message:
           employeeId === primaryOwnerId
-            ? `You are the primary owner for "${title.trim()}". Your achievement updates sync to all linked sheets.`
-            : `"${title.trim()}" was added as a read-only shared KPI. You may adjust weightage only.`,
+            ? `You are the primary owner for "${cleanTitle}". Your achievement updates sync to all linked sheets.`
+            : `"${cleanTitle}" was added as a read-only shared KPI. You may adjust weightage only.`,
         deepLink: '/goals',
       });
       pushed += 1;
@@ -119,7 +171,7 @@ export default function SharedGoalsPage() {
       action: 'PUSH_SHARED_GOAL',
       fieldName: 'recipients',
       oldValue: null,
-      newValue: { title: title.trim(), primaryOwnerId, selectedEmployees },
+      newValue: { title: cleanTitle, primaryOwnerId, selectedEmployees },
       changedBy: user.id,
       ipAddress: null,
       userAgent: null,
@@ -138,26 +190,28 @@ export default function SharedGoalsPage() {
   };
 
   return (
-    <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="animate-in app-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+      <header className="app-page-header">
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0' }}>Shared Goals</h1>
-          <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>Push departmental KPIs. Recipients can edit only weightage.</p>
+          <p className="app-page-eyebrow">Admin workspace</p>
+          <h1 style={{ margin: '0 0 6px 0' }}>Shared Goals</h1>
+          <p className="app-page-meta">Push departmental KPIs. Recipients can edit only weightage.</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          style={{ height: '36px', padding: '0 16px', borderRadius: '8px', border: 'none', background: '#2563eb', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}
-        >Push shared goal</button>
-      </div>
+        <div className="app-page-actions">
+          <button onClick={() => setShowForm(true)} className="btn-primary btn-sm">
+            Push shared goal
+          </button>
+        </div>
+      </header>
 
       {sharedGroups.length === 0 ? (
-        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '56px 24px', textAlign: 'center' }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+        <div style={{ background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border)', padding: '56px 24px', textAlign: 'center' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--brand-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
             <span style={{ fontSize: '22px' }}>🎯</span>
           </div>
-          <p style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', margin: '0 0 6px 0' }}>No shared KPIs yet</p>
-          <p style={{ fontSize: '14px', color: '#64748b', margin: 0, maxWidth: '420px', marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
+          <p style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>No shared KPIs yet</p>
+          <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0, maxWidth: '420px', marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
             Create a departmental KPI and assign it to employees. Linked achievement updates will sync from the primary owner.
           </p>
         </div>
@@ -171,27 +225,27 @@ export default function SharedGoalsPage() {
             const ownerAccount = ownerSheet ? DEMO_ACCOUNTS.find((account) => account.id === ownerSheet.employeeId) : null;
 
             return (
-              <div key={groupId} style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+              <div key={groupId} style={{ background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden' }}>
                 <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', borderBottom: '1px solid #f1f5f9' }}>
                   <div>
-                    <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a', margin: '0 0 2px 0' }}>{firstGoal.title}</p>
-                    <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>
+                    <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 2px 0' }}>{firstGoal.title}</p>
+                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
                       {UOM_LABELS[firstGoal.uomType]} · Target {firstGoal.uomType === 'TIMELINE' && firstGoal.targetDate
                         ? new Date(firstGoal.targetDate).toLocaleDateString('en-IN')
                         : firstGoal.target}
                     </p>
                   </div>
-                  <span style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: '#eff6ff', color: '#2563eb' }}>
+                  <span style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: 'var(--brand-light)', color: 'var(--brand)' }}>
                     {groupGoals.length} linked
                   </span>
                 </div>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: '#f8fafc' }}>
-                      <th style={{ padding: '8px 20px', fontSize: '11px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>Employee</th>
-                      <th style={{ padding: '8px 20px', fontSize: '11px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>Rule</th>
-                      <th style={{ padding: '8px 20px', fontSize: '11px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>Weight</th>
-                      <th style={{ padding: '8px 20px', fontSize: '11px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>Role</th>
+                    <tr style={{ background: 'var(--bg-canvas)' }}>
+                      <th style={{ padding: '8px 20px', fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>Employee</th>
+                      <th style={{ padding: '8px 20px', fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>Rule</th>
+                      <th style={{ padding: '8px 20px', fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>Weight</th>
+                      <th style={{ padding: '8px 20px', fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>Role</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -200,11 +254,11 @@ export default function SharedGoalsPage() {
                       const employee = sheet ? DEMO_ACCOUNTS.find((account) => account.id === sheet.employeeId) : null;
                       return (
                         <tr key={goal.id} style={{ borderTop: gi > 0 ? '1px solid #f1f5f9' : 'none' }}>
-                          <td style={{ padding: '10px 20px', fontSize: '13px', color: '#0f172a', fontWeight: 500 }}>{employee?.name || 'Employee'}</td>
-                          <td style={{ padding: '10px 20px', fontSize: '12px', color: '#64748b' }}>{goal.isOwner ? 'Controls actuals' : 'Weightage only'}</td>
-                          <td style={{ padding: '10px 20px', fontSize: '13px', color: '#0f172a', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{goal.weightage}%</td>
+                          <td style={{ padding: '10px 20px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: 500 }}>{employee?.name || 'Employee'}</td>
+                          <td style={{ padding: '10px 20px', fontSize: '12px', color: 'var(--text-secondary)' }}>{goal.isOwner ? 'Controls actuals' : 'Weightage only'}</td>
+                          <td style={{ padding: '10px 20px', fontSize: '13px', color: 'var(--text-primary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{goal.weightage}%</td>
                           <td style={{ padding: '10px 20px', textAlign: 'right' }}>
-                            <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: ownerAccount?.id === employee?.id ? '#ecfdf5' : '#f1f5f9', color: ownerAccount?.id === employee?.id ? '#065f46' : '#64748b' }}>
+                            <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: ownerAccount?.id === employee?.id ? 'var(--success-bg)' : 'var(--bg-muted)', color: ownerAccount?.id === employee?.id ? 'var(--success)' : 'var(--text-secondary)' }}>
                               {ownerAccount?.id === employee?.id ? 'Primary' : 'Linked'}
                             </span>
                           </td>
@@ -219,68 +273,92 @@ export default function SharedGoalsPage() {
         </div>
       )}
 
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowForm(false)}>
+      {showForm && createPortal(
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div
-            className="w-full max-w-2xl mx-4 bg-[var(--bg-subtle)] border border-[var(--border)] rounded-[var(--radius-xl)] shadow-[var(--shadow-overlay)]"
+            className="modal-panel"
+            style={{ maxWidth: '600px' }}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-5 h-12 border-b border-[var(--border)]">
-              <h2 className="text-[14px] font-semibold">Push shared goal</h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="btn-press h-11 w-11 rounded-[var(--radius-sm)] text-[var(--text-tertiary)] hover:bg-[var(--bg-muted)]"
-                aria-label="Close"
-              >
-                ×
+            {/* ── Header ── */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 28px', borderBottom: '1px solid var(--border)' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Push shared goal</h2>
+              <button onClick={() => setShowForm(false)} aria-label="Close"
+                style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)' }}>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
               </button>
             </div>
 
-            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-              <FormField label="Thrust Area">
-                <select value={thrustAreaId} onChange={(event) => setThrustAreaId(event.target.value)} className={inputClass}>
-                  <option value="">Select</option>
+            {/* ── Form ── */}
+            <div style={{ padding: '28px', maxHeight: '60vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Thrust Area */}
+              <div>
+                <label style={SH.label}>Thrust Area<span style={SH.req}>*</span></label>
+                <select value={thrustAreaId} onChange={(event) => setThrustAreaId(event.target.value)} style={SH.input}>
+                  <option value="">Select…</option>
                   {thrustAreas.filter((area) => area.isActive).map((area) => (
                     <option key={area.id} value={area.id}>{area.name}</option>
                   ))}
                 </select>
-              </FormField>
+              </div>
 
-              <FormField label="Goal Title">
-                <input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={BUSINESS_RULES.MAX_TITLE_LENGTH} className={inputClass} />
-              </FormField>
+              {/* Goal Title */}
+              <div>
+                <label style={SH.label}>Goal Title<span style={SH.req}>*</span></label>
+                <input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={BUSINESS_RULES.MAX_TITLE_LENGTH} placeholder="e.g., Increase Q2 sales by 20%" style={SH.input} />
+              </div>
 
-              <FormField label="Description">
-                <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} className={cn(inputClass, 'h-auto py-2 resize-none')} />
-              </FormField>
+              {/* Description */}
+              <div>
+                <label style={SH.label}>Description</label>
+                <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} placeholder="What this goal aims to achieve…" style={SH.textarea} />
+              </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <FormField label="UoM">
-                  <select value={uomType} onChange={(event) => setUomType(event.target.value as UoMType)} className={inputClass}>
+              {/* UoM / Target / Weightage row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+                <div>
+                  <label style={SH.label}>UoM</label>
+                  <select value={uomType} onChange={(event) => setUomType(event.target.value as UoMType)} style={SH.input}>
                     {(Object.keys(UOM_LABELS) as UoMType[]).map((type) => (
                       <option key={type} value={type}>{UOM_LABELS[type]}</option>
                     ))}
                   </select>
-                </FormField>
+                </div>
                 {uomType === 'TIMELINE' ? (
-                  <FormField label="Deadline">
-                    <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} className={inputClass} />
-                  </FormField>
+                  <div>
+                    <label style={SH.label}>Deadline</label>
+                    <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} style={SH.input} />
+                  </div>
                 ) : (
-                  <FormField label="Target">
-                    <input type="number" value={uomType === 'ZERO_BASED' ? '0' : target} onChange={(event) => setTarget(event.target.value)} disabled={uomType === 'ZERO_BASED'} className={inputClass} />
-                  </FormField>
+                  <div>
+                    <label style={SH.label}>Target</label>
+                    <input type="number" value={uomType === 'ZERO_BASED' ? '0' : target} onChange={(event) => setTarget(event.target.value)} disabled={uomType === 'ZERO_BASED'} style={SH.input} />
+                  </div>
                 )}
-                <FormField label="Weightage">
-                  <input type="number" min={BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL} value={defaultWeightage} onChange={(event) => setDefaultWeightage(event.target.value)} className={inputClass} />
-                </FormField>
+                <div>
+                  <label style={SH.label}>Weightage (%)</label>
+                  <input type="number" min={BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL} value={defaultWeightage} onChange={(event) => setDefaultWeightage(event.target.value)} style={SH.input} />
+                </div>
               </div>
 
+              {/* Recipients */}
               <div>
-                <p className="text-[13px] font-medium text-[var(--text-secondary)] mb-2">
-                  Recipients <span className="text-[11px] text-[var(--text-tertiary)]">(first selected becomes primary owner)</span>
-                </p>
-                <div className="space-y-1">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <p style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', margin: 0 }}>
+                    Recipients <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 400 }}>(first selected becomes primary owner)</span>
+                  </p>
+                  <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--brand)', background: 'var(--brand-light)', padding: '3px 8px', borderRadius: '6px' }}>
+                    Scope: {recipientScopeLabel}
+                  </span>
+                </div>
+                {employees.length === 0 ? (
+                  <div style={{ padding: '20px', borderRadius: '10px', background: 'var(--bg-canvas)', border: '1px dashed var(--border)', textAlign: 'center' }}>
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
+                      No employees report to you. Shared goals can only be pushed to your direct reports.
+                    </p>
+                  </div>
+                ) : null}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {employees.map((employee) => {
                     const selected = selectedEmployees.includes(employee.id);
                     const isPrimary = selected && selectedEmployees[0] === employee.id;
@@ -288,17 +366,18 @@ export default function SharedGoalsPage() {
                       <button
                         key={employee.id}
                         onClick={() => toggleEmployee(employee.id)}
-                        className={cn(
-                          'btn-press w-full grid grid-cols-12 gap-3 items-center px-3 py-2 rounded-[var(--radius-md)] border text-left transition-colors',
-                          selected
-                            ? 'border-[var(--brand)] bg-[var(--brand-muted)]'
-                            : 'border-[var(--border)] hover:bg-[var(--bg-muted)]'
-                        )}
+                        style={{
+                          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', gap: '8px',
+                          width: '100%', padding: '10px 14px', borderRadius: '10px', cursor: 'pointer', textAlign: 'left',
+                          border: selected ? '1.5px solid #2563eb' : '1.5px solid #e2e8f0',
+                          background: selected ? 'var(--brand-light)' : 'var(--bg-surface)',
+                          transition: 'all 150ms',
+                        }}
                       >
-                        <span className="col-span-5 text-[13px] font-medium">{employee.name}</span>
-                        <span className="col-span-4 text-[12px] text-[var(--text-secondary)]">{employee.department}</span>
-                        <span className="col-span-3 text-[11px] text-right text-[var(--text-tertiary)]">
-                          {isPrimary ? 'Primary owner' : selected ? 'Linked recipient' : 'Not selected'}
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{employee.name}</span>
+                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{employee.department}</span>
+                        <span style={{ fontSize: '11px', color: isPrimary ? '#2563eb' : selected ? '#059669' : '#94a3b8', textAlign: 'right', fontWeight: 500 }}>
+                          {isPrimary ? 'Primary owner' : selected ? 'Linked' : 'Not selected'}
                         </span>
                       </button>
                     );
@@ -307,29 +386,40 @@ export default function SharedGoalsPage() {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 px-5 h-14 items-center border-t border-[var(--border)]">
-              <button onClick={() => setShowForm(false)} className="btn-press min-h-11 px-4 rounded-[var(--radius-md)] text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-muted)]">
+            {/* ── Footer ── */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', padding: '16px 28px', borderTop: '1px solid var(--border)' }}>
+              <button onClick={() => setShowForm(false)}
+                style={{ height: '40px', padding: '0 20px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-surface)', cursor: 'pointer', fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>
                 Cancel
               </button>
-              <button onClick={handlePush} className="btn-press min-h-11 px-4 rounded-[var(--radius-md)] bg-[var(--brand)] text-[var(--text-inverse)] text-[13px] font-medium hover:bg-[var(--brand-hover)]">
+              <button onClick={handlePush}
+                style={{ height: '40px', padding: '0 24px', borderRadius: '10px', border: 'none', background: 'var(--brand)', color: 'var(--text-inverse)', cursor: 'pointer', fontSize: '14px', fontWeight: 600 }}>
                 Push to {selectedEmployees.length}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
 }
 
-const inputClass =
-  'w-full min-h-11 px-3 rounded-[var(--radius-md)] bg-[var(--bg-subtle)] border border-[var(--border)] text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] focus:outline-none focus:border-[var(--brand)] disabled:opacity-50';
-
-function FormField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="block text-[13px] font-medium text-[var(--text-secondary)] mb-1.5">{label}</span>
-      {children}
-    </label>
-  );
-}
+/* ── Shared inline style objects (matches GoalCreateDialog pattern) ── */
+const SH = {
+  label: { display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' } as React.CSSProperties,
+  req: { color: 'var(--danger)', marginLeft: '2px' } as React.CSSProperties,
+  input: {
+    width: '100%', height: '44px', padding: '0 36px 0 14px',
+    borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-canvas)',
+    fontSize: '14px', color: 'var(--text-primary)', outline: 'none',
+    transition: 'border-color 150ms, box-shadow 150ms',
+    textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden'
+  } as React.CSSProperties,
+  textarea: {
+    width: '100%', padding: '12px 14px', minHeight: '72px',
+    borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-canvas)',
+    fontSize: '14px', color: 'var(--text-primary)', outline: 'none', resize: 'none' as const,
+    fontFamily: 'inherit', lineHeight: '1.5',
+  } as React.CSSProperties,
+};

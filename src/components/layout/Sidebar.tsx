@@ -61,6 +61,8 @@ const SCENARIOS: { id: DemoScenario; label: string }[] = [
   { id: 'real_date', label: 'Real Date' },
 ];
 
+const THEME_STORAGE_KEY = 'meridian-theme-choice';
+
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -68,12 +70,12 @@ export default function Sidebar() {
   const resetToSeed = useDataStore((state) => state.resetToSeed);
   const { overrideDate, setScenario } = useDemoDateStore();
   const [isDark, setIsDark] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('meridian-theme') === 'dark' : false
+    typeof window !== 'undefined' ? localStorage.getItem(THEME_STORAGE_KEY) === 'dark' : false
   );
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-    localStorage.setItem('meridian-theme', isDark ? 'dark' : 'light');
+    localStorage.setItem(THEME_STORAGE_KEY, isDark ? 'dark' : 'light');
   }, [isDark]);
 
   if (!user) return null;
@@ -85,6 +87,22 @@ export default function Sidebar() {
 
   const demoAccounts = getDemoAccounts();
   const visibleItems = NAV_ITEMS.filter((item) => item.roles.includes(user.role));
+  const getMobileLabel = (label: string) => {
+    const labels: Record<string, string> = {
+      Dashboard: 'Home',
+      'My Goals': 'Goals',
+      'Team Goals': 'Team',
+      'Check-ins': 'Check-ins',
+      Analytics: 'Analytics',
+      Reports: 'Reports',
+      'Shared Goals': 'Shared',
+      Integrations: 'Integrations',
+      'Audit Trail': 'Audit',
+      Escalations: 'Escalations',
+      'Cycle Settings': 'Cycles',
+    };
+    return labels[label] ?? label;
+  };
 
   const getScenarioFromDate = (date: string | null): DemoScenario => {
     if (!date) return 'real_date';
@@ -106,21 +124,22 @@ export default function Sidebar() {
       </div>
 
       {/* ═══ Mobile: Horizontal icon bar ═══ */}
-      <nav className="flex lg:hidden items-center justify-around h-full px-2">
-        {visibleItems.slice(0, 5).map((item) => {
+      <nav className="mobile-tab-bar lg:hidden" aria-label="Mobile navigation">
+        {visibleItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
           return (
             <button
               key={item.href}
               onClick={() => router.push(item.href)}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
-                'flex flex-col items-center justify-center gap-0.5 w-16 h-full text-[10px] font-medium transition-colors',
+                'mobile-tab-item',
                 isActive ? 'text-[var(--brand)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
               )}
             >
               <Icon className="w-5 h-5" />
-              <span>{item.label.split(' ')[0]}</span>
+              <span>{getMobileLabel(item.label)}</span>
             </button>
           );
         })}
@@ -189,8 +208,10 @@ export default function Sidebar() {
             {isDark ? 'Light' : 'Dark'}
           </button>
           <button
-            onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))}
+            onClick={() => window.dispatchEvent(new Event('meridian:open-search'))}
             className="flex items-center justify-center gap-1 flex-1 h-8 rounded-[var(--radius-sm)] text-[11px] font-medium border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] transition-colors"
+            title="Open search"
+            aria-label="Open search"
           >
             ⌘K
           </button>

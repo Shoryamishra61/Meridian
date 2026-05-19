@@ -10,10 +10,13 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/stores/auth-store';
 import { useDataStore } from '@/stores/data-store';
 import { BUSINESS_RULES, UOM_LABELS, UOM_DESCRIPTIONS } from '@/lib/constants';
 import type { Goal } from '@/types';
 import type { UoMType } from '@/lib/constants';
+import { autoTagThrustArea, scoreGoalQuality, detectGoalOverlap, recommendWeightage } from '@/lib/ai-engine';
+import { sanitizeTextInput } from '@/lib/sanitize';
 
 interface GoalCreateDialogProps {
   sheetId: string;
@@ -30,32 +33,34 @@ const GOAL_TYPE_CHIPS = [
 
 /* ── Shared inline style objects ── */
 const S = {
-  label: { display: 'block', fontSize: '13px', fontWeight: 600, color: '#475569', marginBottom: '8px' } as React.CSSProperties,
-  required: { color: '#ef4444', marginLeft: '2px' } as React.CSSProperties,
+  label: { display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' } as React.CSSProperties,
+  required: { color: 'var(--danger)', marginLeft: '2px' } as React.CSSProperties,
   input: {
-    width: '100%', height: '44px', padding: '0 14px',
-    borderRadius: '10px', border: '1.5px solid #cbd5e1', background: '#f8fafc',
-    fontSize: '14px', color: '#0f172a', outline: 'none',
+    width: '100%', height: '44px', padding: '0 36px 0 14px',
+    borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-canvas)',
+    fontSize: '14px', color: 'var(--text-primary)', outline: 'none',
     transition: 'border-color 150ms, box-shadow 150ms',
+    textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden'
   } as React.CSSProperties,
   inputError: {
     width: '100%', height: '44px', padding: '0 14px',
-    borderRadius: '10px', border: '2px solid #ef4444', background: '#ffffff',
-    fontSize: '14px', color: '#0f172a', outline: 'none',
+    borderRadius: '10px', border: '2px solid var(--danger)', background: 'var(--bg-surface)',
+    fontSize: '14px', color: 'var(--text-primary)', outline: 'none',
   } as React.CSSProperties,
   textarea: {
     width: '100%', padding: '12px 14px', minHeight: '88px',
-    borderRadius: '10px', border: '1.5px solid #cbd5e1', background: '#f8fafc',
-    fontSize: '14px', color: '#0f172a', outline: 'none', resize: 'none' as const,
+    borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-canvas)',
+    fontSize: '14px', color: 'var(--text-primary)', outline: 'none', resize: 'none' as const,
     fontFamily: 'inherit', lineHeight: '1.5',
   } as React.CSSProperties,
-  error: { fontSize: '12px', color: '#ef4444', marginTop: '6px', margin: '6px 0 0 0' } as React.CSSProperties,
-  hint: { fontSize: '11px', color: '#94a3b8', marginTop: '4px', margin: '4px 0 0 0' } as React.CSSProperties,
+  error: { fontSize: '12px', color: 'var(--danger)', marginTop: '6px', margin: '6px 0 0 0' } as React.CSSProperties,
+  hint: { fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', margin: '4px 0 0 0' } as React.CSSProperties,
 };
 
 export default function GoalCreateDialog({
   sheetId, editGoalId, existingGoals, onClose,
 }: GoalCreateDialogProps) {
+  const user = useAuthStore((s) => s.user);
   const { addGoal, updateGoal, getGoalById, thrustAreas } = useDataStore();
 
   const editGoal = editGoalId ? getGoalById(editGoalId) : null;
@@ -117,9 +122,12 @@ export default function GoalCreateDialog({
 
   const handleSave = () => {
     if (!validateStep(2)) return;
+    // XSS sanitization on all text inputs (checklist 2.04)
+    const cleanTitle = sanitizeTextInput(title);
+    const cleanDesc = description ? sanitizeTextInput(description) : null;
     const goalData = {
-      sheetId, thrustAreaId, title: title.trim(),
-      description: description.trim() || null, uomType,
+      sheetId, thrustAreaId, title: cleanTitle,
+      description: cleanDesc, uomType,
       target: uomType === 'ZERO_BASED' ? 0 : Number(target),
       targetDate: uomType === 'TIMELINE' ? new Date(targetDate) : null,
       weightage: Number(weightage), isShared: editGoal?.isShared || false,
@@ -127,8 +135,9 @@ export default function GoalCreateDialog({
     };
     try {
       if (isEdit && editGoal) {
-        if (isSharedRecipient) updateGoal(editGoal.id, { weightage: Number(weightage) });
-        else updateGoal(editGoal.id, goalData);
+        const actor = user ? { role: user.role } : undefined;
+        if (isSharedRecipient) updateGoal(editGoal.id, { weightage: Number(weightage) }, actor);
+        else updateGoal(editGoal.id, goalData, actor);
         toast.success('Goal updated');
       } else { addGoal(goalData); toast.success('Goal created'); }
       onClose();
@@ -144,7 +153,7 @@ export default function GoalCreateDialog({
   const chipStyle = (active: boolean): React.CSSProperties => ({
     padding: '14px', borderRadius: '12px', textAlign: 'left', cursor: 'pointer',
     border: active ? '2px solid #2563eb' : '1.5px solid #cbd5e1',
-    background: active ? '#eff6ff' : '#ffffff',
+    background: active ? 'var(--brand-light)' : 'var(--bg-surface)',
     transition: 'all 150ms',
   });
 
@@ -153,16 +162,16 @@ export default function GoalCreateDialog({
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
 
         {/* ── Header ── */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 28px', borderBottom: '1px solid #e2e8f0' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', margin: 0 }}>{isEdit ? 'Edit Goal' : 'New Goal'}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 28px', borderBottom: '1px solid var(--border)' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{isEdit ? 'Edit Goal' : 'New Goal'}</h2>
           <button onClick={onClose} aria-label="Close"
-            style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#94a3b8' }}>
+            style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-tertiary)' }}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           </button>
         </div>
 
         {/* ── Step pills ── */}
-        <div style={{ display: 'flex', alignItems: 'center', padding: '14px 28px', gap: '8px', borderBottom: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '14px 28px', gap: '8px', borderBottom: '1px solid var(--border)' }}>
           {STEPS.map((s, i) => (
             <button key={s} onClick={() => { if (i < step || validateStep(step)) setStep(i); }}
               style={{
@@ -181,7 +190,7 @@ export default function GoalCreateDialog({
               {s}
             </button>
           ))}
-          <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>
             {remainingPool}% pool
           </span>
         </div>
@@ -201,7 +210,7 @@ export default function GoalCreateDialog({
                         onClick={() => { setGoalType(chip.id); if (chip.uoms.length > 0) setUomType(chip.uoms[0]); }}
                         style={chipStyle(goalType === chip.id)}>
                         <p style={{ fontSize: '13px', fontWeight: 600, color: goalType === chip.id ? '#2563eb' : '#0f172a', margin: '0 0 4px 0' }}>{chip.label}</p>
-                        <p style={{ fontSize: '11px', color: '#94a3b8', lineHeight: '1.4', margin: 0 }}>{chip.desc}</p>
+                        <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.4', margin: 0 }}>{chip.desc}</p>
                       </button>
                     ))}
                   </div>
@@ -213,6 +222,7 @@ export default function GoalCreateDialog({
               <div>
                 <label style={S.label}>Thrust Area<span style={S.required}>*</span></label>
                 <select value={thrustAreaId} onChange={(e) => setThrustAreaId(e.target.value)} disabled={!!isSharedRecipient}
+                  aria-label="Thrust Area"
                   style={errors.thrustAreaId ? S.inputError : S.input}>
                   <option value="">Select…</option>
                   {thrustAreas.filter((ta) => ta.isActive).map((ta) => (
@@ -227,11 +237,72 @@ export default function GoalCreateDialog({
                 <label style={S.label}>Goal Title<span style={S.required}>*</span></label>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={!!isSharedRecipient}
                   placeholder="e.g., Increase Q2 sales by 20%" maxLength={BUSINESS_RULES.MAX_TITLE_LENGTH}
+                  aria-label="Goal Title" aria-required="true" aria-invalid={!!errors.title}
                   style={errors.title ? S.inputError : S.input} />
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
                   {errors.title ? <p style={S.error}>{errors.title}</p> : <span />}
                   <span style={S.hint}>{title.length}/{BUSINESS_RULES.MAX_TITLE_LENGTH}</span>
                 </div>
+                {/* Auto-tag suggestions */}
+                {title.length > 5 && !thrustAreaId && (() => {
+                  const tags = autoTagThrustArea(title);
+                  if (tags.length === 0) return null;
+                  const matchedAreas = tags.map(t => {
+                    const ta = thrustAreas.find(a => a.name === t.name);
+                    return ta ? { ...t, id: ta.id } : null;
+                  }).filter(Boolean) as { name: string; confidence: number; id: string }[];
+                  if (matchedAreas.length === 0) return null;
+                  return (
+                    <div style={{ marginTop: '8px', padding: '10px 14px', borderRadius: '10px', background: 'var(--brand-muted, #eff6ff)', border: '1px solid var(--brand-light, #dbeafe)' }}>
+                      <p style={{ fontSize: '11px', fontWeight: 600, color: 'var(--brand, #2563eb)', margin: '0 0 6px 0' }}>Suggested thrust areas:</p>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {matchedAreas.map(tag => (
+                          <button key={tag.id} type="button"
+                            onClick={() => setThrustAreaId(tag.id)}
+                            style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--brand, #2563eb)', background: 'transparent', cursor: 'pointer', fontSize: '12px', fontWeight: 500, color: 'var(--brand, #2563eb)' }}>
+                            {tag.name} ({Math.round(tag.confidence * 100)}%)
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Real-time Goal Quality Score */}
+                {title.length > 10 && (() => {
+                  const quality = scoreGoalQuality(title, description);
+                  const gradeColors = { excellent: '#16a34a', good: '#2563eb', fair: '#d97706', poor: '#dc2626' };
+                  const gradeBgs = { excellent: 'var(--success-bg)', good: 'var(--brand-light)', fair: 'var(--warning-bg)', poor: 'var(--danger-bg)' };
+                  return (
+                    <div style={{ marginTop: '8px', padding: '10px 14px', borderRadius: '10px', background: gradeBgs[quality.grade], border: `1px solid ${gradeColors[quality.grade]}22` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: gradeColors[quality.grade], textTransform: 'uppercase' }}>SMART Score: {quality.score}/100 ({quality.grade})</span>
+                        <span style={{ width: '60px', height: '4px', borderRadius: '2px', background: 'var(--bg-muted)', overflow: 'hidden' }}>
+                          <span style={{ display: 'block', height: '100%', width: `${quality.score}%`, background: gradeColors[quality.grade], borderRadius: '2px', transition: 'width 300ms' }} />
+                        </span>
+                      </div>
+                      {quality.feedback.slice(0, 2).map((fb, i) => (
+                        <p key={i} style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '2px 0 0 0', lineHeight: '1.3' }}>{fb}</p>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                {/* Semantic Overlap Warning */}
+                {title.length > 5 && (() => {
+                  const overlaps = detectGoalOverlap(title, existingGoals.filter(g => g.id !== editGoalId));
+                  if (overlaps.length === 0) return null;
+                  return (
+                    <div style={{ marginTop: '6px', padding: '8px 12px', borderRadius: '8px', background: 'var(--warning-bg)', border: '1px solid var(--warning)' }}>
+                      <p style={{ fontSize: '11px', fontWeight: 600, color: 'var(--warning)', margin: '0 0 2px 0' }}>⚠️ Similar goal detected:</p>
+                      {overlaps.map((o) => (
+                        <p key={o.goalId} style={{ fontSize: '11px', color: '#a16207', margin: '1px 0 0 0' }}>
+                          &ldquo;{o.goalTitle}&rdquo; ({Math.round(o.similarity * 100)}% match)
+                        </p>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Description */}
@@ -239,6 +310,7 @@ export default function GoalCreateDialog({
                 <label style={S.label}>Description</label>
                 <textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={!!isSharedRecipient}
                   placeholder="What this goal aims to achieve…" rows={3} maxLength={BUSINESS_RULES.MAX_DESCRIPTION_LENGTH}
+                  aria-label="Goal Description"
                   style={S.textarea} />
               </div>
             </>
@@ -258,7 +330,7 @@ export default function GoalCreateDialog({
                       <p style={{ fontSize: '13px', fontWeight: 600, color: uomType === type ? '#2563eb' : '#0f172a', margin: '0 0 4px 0' }}>
                         {type.replace('NUMERIC_', '').replace('_BASED', '').replace('PERCENTAGE_', '% ')}
                       </p>
-                      <p style={{ fontSize: '11px', color: '#94a3b8', lineHeight: '1.4', margin: 0 }}>{UOM_DESCRIPTIONS[type]}</p>
+                      <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: '1.4', margin: 0 }}>{UOM_DESCRIPTIONS[type]}</p>
                     </button>
                   ))}
                 </div>
@@ -283,8 +355,8 @@ export default function GoalCreateDialog({
               )}
 
               {uomType === 'ZERO_BASED' && (
-                <div style={{ padding: '14px 16px', borderRadius: '12px', background: '#eff6ff', border: '1px solid #dbeafe' }}>
-                  <p style={{ fontSize: '13px', color: '#475569', margin: 0 }}>Zero-based: 0 incidents = 100% score. Any value {'>'} 0 = 0%.</p>
+                <div style={{ padding: '14px 16px', borderRadius: '12px', background: 'var(--brand-light)', border: '1px solid #dbeafe' }}>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>Zero-based: 0 incidents = 100% score. Any value {'>'} 0 = 0%.</p>
                 </div>
               )}
             </>
@@ -296,30 +368,48 @@ export default function GoalCreateDialog({
               <div>
                 <label style={S.label}>Weightage (%)<span style={S.required}>*</span></label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <button type="button" onClick={() => stepWeightage(-5)}
-                    style={{ width: '48px', height: '48px', borderRadius: '12px', border: '1.5px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer', fontSize: '20px', fontWeight: 500, color: '#475569', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>−</button>
+                  <button type="button" onClick={() => stepWeightage(-5)} aria-label="Decrease weightage"
+                    style={{ width: '48px', height: '48px', borderRadius: '12px', border: '1.5px solid var(--border)', background: 'var(--bg-canvas)', cursor: 'pointer', fontSize: '20px', fontWeight: 500, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>−</button>
                   <input type="text" inputMode="numeric" value={weightage} onChange={(e) => handleWeightageChange(e.target.value)}
                     placeholder={`${BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL}`}
+                    aria-label="Goal Weightage" aria-required="true"
                     style={{ ...S.input, height: '48px', fontSize: '22px', fontWeight: 700, textAlign: 'center' }} />
-                  <button type="button" onClick={() => stepWeightage(5)}
-                    style={{ width: '48px', height: '48px', borderRadius: '12px', border: '1.5px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer', fontSize: '20px', fontWeight: 500, color: '#475569', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>+</button>
+                  <button type="button" onClick={() => stepWeightage(5)} aria-label="Increase weightage"
+                    style={{ width: '48px', height: '48px', borderRadius: '12px', border: '1.5px solid var(--border)', background: 'var(--bg-canvas)', cursor: 'pointer', fontSize: '20px', fontWeight: 500, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>+</button>
                 </div>
                 <p style={S.hint}>
                   Available: {remainingPool}% · Range: {BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL}–{Math.min(BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL, remainingPool)}%
                 </p>
                 {errors.weightage && <p style={S.error}>{errors.weightage}</p>}
+
+                {/* Smart Weightage Recommendation (A.3) */}
+                {thrustAreaId && !weightage && (() => {
+                  const ta = thrustAreas.find((a) => a.id === thrustAreaId);
+                  if (!ta) return null;
+                  const rec = recommendWeightage(ta.name, existingGoals.filter((g) => g.id !== editGoalId).length, remainingPool);
+                  return (
+                    <div style={{ marginTop: '8px', padding: '10px 14px', borderRadius: '10px', background: 'var(--success-bg)', border: '1px solid #bbf7d0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#16a34a' }}>💡 AI Suggestion: {rec.suggested}%</span>
+                        <button type="button" onClick={() => setWeightage(String(rec.suggested))}
+                          style={{ padding: '3px 10px', borderRadius: '6px', border: '1px solid #16a34a', background: 'transparent', cursor: 'pointer', fontSize: '11px', fontWeight: 600, color: '#16a34a' }}>Apply</button>
+                      </div>
+                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0 }}>{rec.rationale}</p>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Progress bar */}
-              <div style={{ padding: '16px 18px', borderRadius: '12px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              <div style={{ padding: '16px 18px', borderRadius: '12px', background: 'var(--bg-canvas)', border: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '10px' }}>
-                  <span style={{ color: '#475569' }}>Total after this goal</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>Total after this goal</span>
                   <span style={{
                     fontWeight: 700, fontVariantNumeric: 'tabular-nums',
                     color: totalAfter === 100 ? '#10b981' : totalAfter > 100 ? '#ef4444' : '#0f172a',
                   }}>{totalAfter}%</span>
                 </div>
-                <div style={{ height: '8px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
+                <div style={{ height: '8px', background: 'var(--bg-muted)', borderRadius: '999px', overflow: 'hidden' }}>
                   <div style={{
                     height: '100%', borderRadius: '999px', transition: 'width 300ms ease',
                     width: `${Math.min(totalAfter, 100)}%`,
@@ -332,19 +422,19 @@ export default function GoalCreateDialog({
         </div>
 
         {/* ── Footer ── */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 28px', borderTop: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 28px', borderTop: '1px solid var(--border)' }}>
           <button onClick={step === 0 ? onClose : prevStep}
-            style={{ height: '40px', padding: '0 20px', borderRadius: '10px', border: '1.5px solid #cbd5e1', background: '#ffffff', cursor: 'pointer', fontSize: '14px', fontWeight: 500, color: '#475569' }}>
+            style={{ height: '40px', padding: '0 20px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-surface)', cursor: 'pointer', fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)' }}>
             {step === 0 ? 'Cancel' : '← Back'}
           </button>
           {step < 2 ? (
             <button onClick={nextStep}
-              style={{ height: '40px', padding: '0 24px', borderRadius: '10px', border: 'none', background: '#2563eb', color: '#ffffff', cursor: 'pointer', fontSize: '14px', fontWeight: 600 }}>
+              style={{ height: '40px', padding: '0 24px', borderRadius: '10px', border: 'none', background: 'var(--brand)', color: 'var(--text-inverse)', cursor: 'pointer', fontSize: '14px', fontWeight: 600 }}>
               Next →
             </button>
           ) : (
             <button onClick={handleSave}
-              style={{ height: '40px', padding: '0 24px', borderRadius: '10px', border: 'none', background: '#2563eb', color: '#ffffff', cursor: 'pointer', fontSize: '14px', fontWeight: 600 }}>
+              style={{ height: '40px', padding: '0 24px', borderRadius: '10px', border: 'none', background: 'var(--brand)', color: 'var(--text-inverse)', cursor: 'pointer', fontSize: '14px', fontWeight: 600 }}>
               {isEdit ? 'Save changes' : 'Create goal'}
             </button>
           )}

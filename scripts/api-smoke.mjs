@@ -12,7 +12,11 @@ async function expectOk(name, path, init) {
 await expectOk('health', '/api/health');
 await expectOk('goal sheet validation', '/api/goal-sheets/validate', {
   method: 'POST',
-  headers: { 'content-type': 'application/json' },
+  headers: {
+    'content-type': 'application/json',
+    'x-meridian-demo-role': 'EMPLOYEE',
+    'x-meridian-demo-user-id': 'emp-priya-001',
+  },
   body: JSON.stringify({
     goals: [
       { title: 'Revenue growth', weightage: 40 },

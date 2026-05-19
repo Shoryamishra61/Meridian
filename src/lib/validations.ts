@@ -11,7 +11,12 @@ const entityIdSchema = z.string().min(1, 'Identifier is required');
 
 // ─── Goal Creation Schema ───────────────────────────────────────
 
-export const goalCreateSchema = z.object({
+/**
+ * Raw object schema for a goal. Kept un-refined so that derived schemas
+ * (e.g. `goalUpdateSchema`) can call `.partial()` / `.extend()` on it —
+ * Zod does not allow those methods on a `ZodEffects` (i.e., a refined schema).
+ */
+const goalBaseShape = z.object({
   thrustAreaId: z.string().min(1, 'Thrust Area is required'),
   title: z
     .string()
@@ -27,39 +32,46 @@ export const goalCreateSchema = z.object({
   targetDate: z.string().optional().nullable(),
   weightage: z
     .number()
+    .int('Weightage must be a whole number')
     .min(BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL, `Minimum weightage is ${BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL}%`)
     .max(BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL, `Maximum weightage is ${BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL}%`),
-}).refine(
-  (data) => {
-    // Timeline UoM requires a target date
-    if (data.uomType === 'TIMELINE' && !data.targetDate) {
-      return false;
+});
+
+export const goalCreateSchema = goalBaseShape
+  .refine(
+    (data) => {
+      // Timeline UoM requires a target date
+      if (data.uomType === 'TIMELINE' && !data.targetDate) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: 'Target date is required for Timeline goals',
+      path: ['targetDate'],
     }
-    return true;
-  },
-  {
-    message: 'Target date is required for Timeline goals',
-    path: ['targetDate'],
-  }
-).refine(
-  (data) => {
-    // Zero-based UoM: target should be 0
-    if (data.uomType === 'ZERO_BASED' && data.target !== 0) {
-      return false;
+  )
+  .refine(
+    (data) => {
+      // Zero-based UoM: target should be 0
+      if (data.uomType === 'ZERO_BASED' && data.target !== 0) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: 'Zero-based goals must have a target of 0',
+      path: ['target'],
     }
-    return true;
-  },
-  {
-    message: 'Zero-based goals must have a target of 0',
-    path: ['target'],
-  }
-);
+  );
 
 export type GoalCreateInput = z.infer<typeof goalCreateSchema>;
 
 // ─── Goal Update Schema ─────────────────────────────────────────
+// Built from `goalBaseShape` (the un-refined object) because Zod's
+// `.partial()` is invalid on a refined schema.
 
-export const goalUpdateSchema = goalCreateSchema.partial().extend({
+export const goalUpdateSchema = goalBaseShape.partial().extend({
   id: entityIdSchema,
 });
 
@@ -81,6 +93,7 @@ export const goalApproveSchema = z.object({
     target: z.number().positive('Target must be positive').optional(),
     weightage: z
       .number()
+      .int('Weightage must be a whole number')
       .min(BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL)
       .max(BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL)
       .optional(),
@@ -107,10 +120,21 @@ export const goalUnlockSchema = z.object({
 
 // ─── Quarterly Check-in Schema ──────────────────────────────────
 
+/**
+ * Hard ceiling for numeric `actualAchievement` inputs. Set high enough to
+ * accommodate genuine over-achievement (10x target) but low enough to reject
+ * obvious typos / abuse (1e6+). BRD scoring formulas can exceed 100% but the
+ * underlying number must remain a sane real-world value.
+ */
+export const MAX_ACTUAL_ACHIEVEMENT = 1_000_000_000;
+
 export const checkinSubmitSchema = z.object({
   goalId: entityIdSchema,
   quarter: z.enum(['Q1', 'Q2', 'Q3', 'Q4']),
-  actualAchievement: z.number().min(0, 'Achievement must be 0 or greater'),
+  actualAchievement: z
+    .number()
+    .min(0, 'Achievement must be 0 or greater')
+    .max(MAX_ACTUAL_ACHIEVEMENT, 'Achievement value is unrealistically large'),
   completionDate: z.string().optional().nullable(),
   status: z.enum(['NOT_STARTED', 'ON_TRACK', 'COMPLETED']),
   notes: z.string().optional(),

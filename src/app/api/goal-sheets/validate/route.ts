@@ -13,6 +13,21 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  // ── Auth check: reject unauthenticated requests ──
+  const authHeader = request.headers.get('authorization');
+  const demoRoleHeader = request.headers.get('x-meridian-demo-role');
+  const cookieHeader = request.headers.get('cookie') ?? '';
+  const hasSession = cookieHeader.includes('meridian-auth');
+
+  // Accept if: auth header present, demo role header set, or session cookie exists
+  if (!authHeader && !demoRoleHeader && !hasSession) {
+    return NextResponse.json(
+      { ok: false, code: 'UNAUTHENTICATED', message: 'Authentication required. Please sign in.' },
+      { status: 401 }
+    );
+  }
+
+  // ── Rate limiting ──
   const forwardedFor = request.headers.get('x-forwarded-for') ?? 'local';
   const rateLimit = checkInMemoryRateLimit(`goal-validate:${forwardedFor}`, 60, 60_000);
   if (!rateLimit.ok) {
@@ -22,6 +37,7 @@ export async function POST(request: Request) {
     );
   }
 
+  // ── Input validation ──
   const body = await request.json().catch(() => null);
   const parsed = requestSchema.safeParse(body);
 

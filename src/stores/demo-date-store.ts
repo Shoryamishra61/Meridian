@@ -3,7 +3,7 @@
  * 
  * NON-NEGOTIABLE: All date checks throughout the app use this provider
  * instead of raw `new Date()`. This allows demonstrating quarterly windows
- * (e.g., simulate "July" for Q1 check-in) during the hackathon demo.
+ * (e.g., simulate "July" for Q1 check-in) for demonstration purposes.
  * 
  * Feature-flagged: Only shows the date picker UI when DEMO_MODE=true.
  */
@@ -49,7 +49,7 @@ export const useDemoDateStore = create<DemoDateState>()(
   persist(
     (set, get) => ({
       overrideDate: null,
-      isDemoMode: true, // Always on for hackathon
+      isDemoMode: true,
 
       setDemoDate: (date: string | null) => {
         set({ overrideDate: date });
@@ -69,6 +69,11 @@ export const useDemoDateStore = create<DemoDateState>()(
     }),
     {
       name: 'meridian-demo-date',
+      version: 2,
+      migrate: (persisted, version) => {
+        if (!version || version < 2) return {} as DemoDateState;
+        return (persisted ?? {}) as DemoDateState;
+      },
     }
   )
 );

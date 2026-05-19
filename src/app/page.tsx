@@ -9,7 +9,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import { toast } from 'sonner';
@@ -19,11 +19,19 @@ import { DEMO_ACCOUNTS, DEMO_PASSWORD } from '@/lib/constants';
 export default function LoginPage() {
   const router = useRouter();
   const login = useAuthStore((s) => s.login);
+  const user = useAuthStore((s) => s.user);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSsoLoading, setIsSsoLoading] = useState(false);
+
+  useEffect(() => {
+    if (hasHydrated && user) {
+      router.replace('/dashboard');
+    }
+  }, [hasHydrated, router, user]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,7 +69,7 @@ export default function LoginPage() {
   ];
 
   return (
-    <div className="min-h-screen flex w-full bg-white">
+    <div className="min-h-screen flex w-full" style={{ backgroundColor: 'var(--bg-surface)' }}>
       {/* ═══ Left Side: Brand Area (Hidden on Mobile) ═══ */}
       <div 
         className="hidden lg:flex lg:w-1/2 bg-[var(--brand)] relative overflow-hidden flex-col justify-between"
@@ -90,9 +98,10 @@ export default function LoginPage() {
         </div>
 
         {/* Footer Text */}
-        <div className="relative z-10 text-blue-200 text-[13px] font-medium">
-          © {new Date().getFullYear()} Atomberg Technologies
-        </div>
+        <div 
+          className="relative z-10 text-blue-200 text-[13px] font-medium" 
+          dangerouslySetInnerHTML={{ __html: '&copy; 2026 Atomberg Technologies' }}
+        />
       </div>
 
       {/* ═══ Right Side: Login Form ═══ */}
@@ -105,13 +114,13 @@ export default function LoginPage() {
               <rect width="28" height="28" rx="6" fill="var(--brand)" />
               <path d="M14 7L14 21M7 14L21 14M9.5 9.5L18.5 18.5M18.5 9.5L9.5 18.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.9"/>
             </svg>
-            <span className="text-lg font-bold tracking-tight text-[var(--text-primary)]">Meridian</span>
+            <span className="text-lg font-bold tracking-tight">Meridian</span>
           </div>
 
           {/* Headers */}
           <div style={{ marginBottom: '20px' }}>
-            <h2 className="text-3xl font-extrabold tracking-tight text-[var(--text-primary)]" style={{ marginBottom: '6px' }}>Sign in</h2>
-            <p className="text-[14px] text-[var(--text-secondary)]">
+            <h2 className="text-3xl font-extrabold tracking-tight" style={{ marginBottom: '6px' }}>Sign in</h2>
+            <p className="text-[14px]" style={{ color: 'var(--text-secondary)' }}>
               Welcome back. Please enter your details.
             </p>
           </div>
@@ -122,8 +131,8 @@ export default function LoginPage() {
               type="button"
               onClick={handleMicrosoftSignIn}
               disabled={isSsoLoading}
-              className="w-full flex items-center justify-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-white text-[14px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-wash)] transition-colors shadow-sm"
-              style={{ height: '44px' }}
+              className="w-full flex items-center justify-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-strong)] text-[14px] font-semibold hover:bg-[var(--bg-wash)] transition-colors shadow-sm"
+              style={{ height: '44px', backgroundColor: 'var(--bg-surface)', color: 'var(--text-primary)' }}
             >
               <svg width="18" height="18" viewBox="0 0 23 23" fill="none">
                 <path d="M11 0H0V11H11V0Z" fill="#F25022" />
@@ -138,7 +147,7 @@ export default function LoginPage() {
           {/* Divider */}
           <div className="flex items-center gap-4" style={{ marginBottom: '18px' }}>
             <div className="flex-1 h-px bg-[var(--border)]" />
-            <span className="text-[11px] text-[var(--text-muted)] font-bold uppercase tracking-widest">or sign in with email</span>
+            <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>or sign in with email</span>
             <div className="flex-1 h-px bg-[var(--border)]" />
           </div>
 
@@ -146,7 +155,7 @@ export default function LoginPage() {
           <form onSubmit={handleLogin}>
             {/* Email */}
             <div style={{ marginBottom: '10px' }}>
-              <label htmlFor="login-email" className="block text-[13px] font-semibold text-[var(--text-primary)]" style={{ marginBottom: '6px' }}>
+              <label htmlFor="login-email" className="block text-[13px] font-semibold" style={{ marginBottom: '6px' }}>
                 Email
               </label>
               <input
@@ -164,7 +173,7 @@ export default function LoginPage() {
 
             {/* Password */}
             <div style={{ marginBottom: '18px' }}>
-              <label htmlFor="login-password" className="block text-[13px] font-semibold text-[var(--text-primary)]" style={{ marginBottom: '6px' }}>
+              <label htmlFor="login-password" className="block text-[13px] font-semibold" style={{ marginBottom: '6px' }}>
                 Password
               </label>
               <div className="relative">
@@ -182,8 +191,8 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-0 top-0 flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-                  style={{ height: '44px', width: '44px' }}
+                  className="absolute right-0 top-0 flex items-center justify-center hover:opacity-80 transition-colors"
+                  style={{ height: '44px', width: '44px', color: 'var(--text-muted)' }}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   <svg width="16" height="16" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -218,7 +227,7 @@ export default function LoginPage() {
 
           {/* Demo accounts */}
           <div>
-            <p className="text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-wider" style={{ marginBottom: '10px' }}>Demo accounts</p>
+            <p className="text-[11px] font-bold uppercase tracking-wider" style={{ marginBottom: '10px', color: 'var(--text-muted)' }}>Demo accounts</p>
             <div className="flex flex-col" style={{ gap: '6px' }}>
               {roleAccounts.map((account) => (
                 <button
@@ -229,23 +238,23 @@ export default function LoginPage() {
                   style={{ padding: '6px', gap: '8px' }}
                 >
                   <span 
-                    className="rounded-[var(--radius-sm)] bg-white text-[12px] font-bold flex items-center justify-center text-[var(--text-secondary)] flex-shrink-0 shadow-sm border border-[var(--border)]"
-                    style={{ width: '36px', height: '36px' }}
+                    className="rounded-[var(--radius-sm)] text-[12px] font-bold flex items-center justify-center flex-shrink-0 shadow-sm border border-[var(--border)]"
+                    style={{ width: '36px', height: '36px', backgroundColor: 'var(--bg-surface)', color: 'var(--text-secondary)' }}
                   >
                     {account.avatarInitials}
                   </span>
                   <span className="flex-1 min-w-0 text-left">
-                    <span className="text-[13px] font-semibold block text-[var(--text-primary)]">{account.name}</span>
-                    <span className="text-[11px] text-[var(--text-secondary)] block">{account.email}</span>
+                    <span className="text-[13px] font-semibold block" style={{ color: 'var(--text-primary)' }}>{account.name}</span>
+                    <span className="text-[11px] block" style={{ color: 'var(--text-secondary)' }}>{account.email}</span>
                   </span>
-                  <span className="text-[10px] text-[var(--text-tertiary)] font-bold uppercase tracking-wider group-hover:text-[var(--brand)] transition-colors">
+                  <span className="text-[10px] font-bold uppercase tracking-wider group-hover:text-[var(--brand)] transition-colors" style={{ color: 'var(--text-tertiary)' }}>
                     {account.label}
                   </span>
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-[var(--text-muted)] text-center" style={{ marginTop: '16px' }}>
-              Password for all demo accounts: <code className="font-mono bg-[var(--bg-muted)] px-1.5 py-0.5 rounded text-[var(--text-secondary)] font-semibold">{DEMO_PASSWORD}</code>
+            <p className="text-[11px] text-center" style={{ marginTop: '16px', color: 'var(--text-muted)' }}>
+              Password for all demo accounts: <code className="font-mono px-1.5 py-0.5 rounded text-[12px] font-semibold" style={{ backgroundColor: 'var(--bg-muted)', color: 'var(--text-secondary)' }}>{DEMO_PASSWORD}</code>
             </p>
           </div>
         </div>

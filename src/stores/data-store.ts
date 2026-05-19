@@ -1,7 +1,7 @@
 /**
  * Meridian — Demo Data Store
  *
- * Zustand-backed demo database for the hackathon golden path. It enforces the
+ * Zustand-backed demo database. It enforces the
  * ATOMQUEST BRD behaviors even before the production Supabase/tRPC adapter is
  * wired in: locking, shared-goal sync, check-in locks, notifications, audit, and
  * escalation logs.
@@ -34,6 +34,14 @@ import type {
   QuarterlyUpdate,
   ThrustArea,
 } from '@/types';
+import {
+  EXTRA_SHEETS,
+  EXTRA_GOALS,
+  EXTRA_UPDATES,
+  EXTRA_CHECKINS,
+  EXTRA_AUDIT_LOGS,
+  EXTRA_NOTIFICATIONS,
+} from './seed-data-extended';
 
 let idCounter = 0;
 
@@ -45,6 +53,26 @@ function generateId(): string {
 function now(): Date {
   return new Date();
 }
+
+/**
+ * Synchronous DJB2-based audit chain hash. Each entry's hash mixes the
+ * previous hash with the entry payload, producing a tamper-evident chain that
+ * is persisted with the record (no race between hashing and persistence).
+ *
+ * SubtleCrypto SHA-256 is intentionally NOT used here because it is async
+ * and would require deferring `set()` — which would break referential
+ * integrity if multiple audit entries arrive in the same tick.
+ */
+function computeAuditHashSync(payload: string, previousHash: string): string {
+  const data = `${previousHash}|${payload}`;
+  let hash = 5381;
+  for (let i = 0; i < data.length; i++) {
+    hash = ((hash << 5) + hash + data.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+let lastAuditHash = '0000000000000000';
 
 const SEED_THRUST_AREAS: ThrustArea[] = DEFAULT_THRUST_AREAS.map((ta, i) => ({
   id: `ta-${i + 1}`,
@@ -144,6 +172,57 @@ const SEED_SHEETS: GoalSheet[] = [
 ];
 
 const SEED_GOALS: Goal[] = [
+  {
+    id: 'goal-priya-001',
+    sheetId: 'sheet-priya-001',
+    thrustAreaId: 'ta-1',
+    title: 'Grow strategic dealer revenue',
+    description: 'Increase revenue from priority Sales & BD dealer accounts across the FY 2025-26 cycle.',
+    uomType: 'NUMERIC_MIN',
+    target: 18,
+    targetDate: null,
+    weightage: 40,
+    isShared: false,
+    sharedFromId: null,
+    isOwner: true,
+    displayOrder: 0,
+    createdAt: new Date('2025-05-02'),
+    updatedAt: new Date('2025-05-02'),
+  },
+  {
+    id: 'goal-priya-002',
+    sheetId: 'sheet-priya-001',
+    thrustAreaId: 'ta-3',
+    title: 'Improve channel conversion rate',
+    description: 'Raise qualified lead-to-order conversion by tightening partner follow-ups and proposal quality.',
+    uomType: 'PERCENTAGE_MIN',
+    target: 32,
+    targetDate: null,
+    weightage: 30,
+    isShared: false,
+    sharedFromId: null,
+    isOwner: true,
+    displayOrder: 1,
+    createdAt: new Date('2025-05-02'),
+    updatedAt: new Date('2025-05-02'),
+  },
+  {
+    id: 'goal-priya-003',
+    sheetId: 'sheet-priya-001',
+    thrustAreaId: 'ta-6',
+    title: 'Reduce sales discount leakage',
+    description: 'Keep average discount leakage within approved guardrails while protecting priority wins.',
+    uomType: 'PERCENTAGE_MAX',
+    target: 6,
+    targetDate: null,
+    weightage: 30,
+    isShared: false,
+    sharedFromId: null,
+    isOwner: true,
+    displayOrder: 2,
+    createdAt: new Date('2025-05-02'),
+    updatedAt: new Date('2025-05-02'),
+  },
   {
     id: 'goal-rahul-001',
     sheetId: 'sheet-rahul-001',
@@ -349,6 +428,15 @@ const SEED_GOALS: Goal[] = [
     updatedAt: new Date('2025-05-16'),
   },
 ];
+
+const DEFAULT_GOAL_SHEETS = [...SEED_SHEETS, ...EXTRA_SHEETS];
+const DEFAULT_GOALS = [...SEED_GOALS, ...EXTRA_GOALS];
+
+function mergeMissingById<T extends { id: string }>(current: T[] | undefined, defaults: T[]): T[] {
+  const existing = current ?? [];
+  const existingIds = new Set(existing.map((item) => item.id));
+  return [...existing, ...defaults.filter((item) => !existingIds.has(item.id))];
+}
 
 const SEED_UPDATES: QuarterlyUpdate[] = [
   {
@@ -708,7 +796,12 @@ interface DataState {
   updateSheetStatus: (sheetId: string, status: GoalSheet['status'], extra?: Partial<GoalSheet>) => void;
 
   addGoal: (goal: Omit<Goal, 'id' | 'createdAt' | 'updatedAt' | 'displayOrder'>) => Goal;
-  updateGoal: (goalId: string, updates: Partial<Goal>) => void;
+  /**
+   * Update a goal. Pass `actor` to enforce role-aware authorization (e.g.,
+   * employees cannot mutate goals while sheet is PENDING_APPROVAL). When
+   * `actor` is omitted, only the simple status-based edit policy applies.
+   */
+  updateGoal: (goalId: string, updates: Partial<Goal>, actor?: { role: 'EMPLOYEE' | 'MANAGER' | 'ADMIN' }) => void;
   deleteGoal: (goalId: string) => void;
   getGoalsBySheet: (sheetId: string) => Goal[];
   getGoalById: (goalId: string) => Goal | undefined;
@@ -732,13 +825,58 @@ export const useDataStore = create<DataState>()(
     (set, get) => ({
       thrustAreas: SEED_THRUST_AREAS,
       cycles: [SEED_CYCLE],
-      goalSheets: [...SEED_SHEETS],
-      goals: [...SEED_GOALS],
-      quarterlyUpdates: [...SEED_UPDATES],
-      managerCheckins: [...SEED_MANAGER_CHECKINS],
-      auditLogs: [...SEED_AUDIT_LOGS],
-      notifications: [...SEED_NOTIFICATIONS],
-      escalationEvents: [],
+      goalSheets: DEFAULT_GOAL_SHEETS,
+      goals: DEFAULT_GOALS,
+      quarterlyUpdates: [...SEED_UPDATES, ...EXTRA_UPDATES],
+      managerCheckins: [...SEED_MANAGER_CHECKINS, ...EXTRA_CHECKINS],
+      auditLogs: [...SEED_AUDIT_LOGS, ...EXTRA_AUDIT_LOGS],
+      notifications: [...SEED_NOTIFICATIONS, ...EXTRA_NOTIFICATIONS],
+      escalationEvents: [
+        {
+          id: 'esc-001',
+          ruleId: 'rule-late-submit',
+          targetUserId: 'emp-aditya-008',
+          notifiedUserId: 'mgr-deepa-002',
+          level: 'MANAGER',
+          triggeredAt: new Date('2025-06-15T10:00:00'),
+          resolvedAt: new Date('2025-06-16T14:30:00'),
+          resolvedBy: 'emp-aditya-008',
+          resolutionNote: 'Goals submitted after manager reminder.',
+        },
+        {
+          id: 'esc-002',
+          ruleId: 'rule-late-approve',
+          targetUserId: 'emp-sneha-009',
+          notifiedUserId: 'mgr-deepa-002',
+          level: 'MANAGER',
+          triggeredAt: new Date('2025-06-18T09:00:00'),
+          resolvedAt: null,
+          resolvedBy: null,
+          resolutionNote: null,
+        },
+        {
+          id: 'esc-003',
+          ruleId: 'rule-checkin-overdue',
+          targetUserId: 'emp-priya-003',
+          notifiedUserId: 'mgr-arjun-001',
+          level: 'MANAGER',
+          triggeredAt: new Date('2025-08-05T08:00:00'),
+          resolvedAt: new Date('2025-08-07T11:15:00'),
+          resolvedBy: 'emp-priya-003',
+          resolutionNote: 'Q1 check-in completed after follow-up.',
+        },
+        {
+          id: 'esc-004',
+          ruleId: 'rule-late-submit',
+          targetUserId: 'emp-karan-010',
+          notifiedUserId: 'admin-hr-001',
+          level: 'HR',
+          triggeredAt: new Date('2025-06-20T09:30:00'),
+          resolvedAt: null,
+          resolvedBy: null,
+          resolutionNote: null,
+        },
+      ],
 
       getOrCreateSheet: (employeeId, cycleId) => {
         const state = get();
@@ -806,11 +944,22 @@ export const useDataStore = create<DataState>()(
           throw new Error(`A goal sheet can contain at most ${BUSINESS_RULES.MAX_GOALS_PER_CYCLE} goals.`);
         }
 
+        // Defense-in-depth input validation (beyond Zod) — protects the
+        // store against malformed callers and persisted-state tampering.
+        if (!Number.isFinite(goalData.weightage)) {
+          throw new Error('Weightage must be a finite number.');
+        }
+        if (!Number.isInteger(goalData.weightage)) {
+          throw new Error('Weightage must be a whole number.');
+        }
         if (goalData.weightage < BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL) {
           throw new Error(`Minimum goal weightage is ${BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL}%.`);
         }
         if (goalData.weightage > BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL) {
           throw new Error(`Maximum goal weightage is ${BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL}%.`);
+        }
+        if (!Number.isFinite(goalData.target) || goalData.target < 0) {
+          throw new Error('Target value must be a non-negative number.');
         }
 
         const nextTotal = sheetGoals.reduce((sum, goal) => sum + goal.weightage, 0) + goalData.weightage;
@@ -830,13 +979,23 @@ export const useDataStore = create<DataState>()(
         return newGoal;
       },
 
-      updateGoal: (goalId, updates) => {
+      updateGoal: (goalId, updates, actor) => {
         const currentGoal = get().goals.find((goal) => goal.id === goalId);
         const sheet = currentGoal ? get().goalSheets.find((candidate) => candidate.id === currentGoal.sheetId) : null;
 
-        if (sheet && sheet.status !== 'PENDING_APPROVAL') {
-          const editPolicy = assertEmployeeCanEditSheet(sheet);
-          if (!editPolicy.ok) throw new Error(editPolicy.message);
+        if (sheet) {
+          if (sheet.status === 'PENDING_APPROVAL') {
+            // During PENDING_APPROVAL only managers/admins may edit (inline
+            // approval workflow); employees see a read-only sheet. When no
+            // actor is provided (legacy callers) we keep prior behavior and
+            // let UI gating handle it.
+            if (actor && actor.role === 'EMPLOYEE') {
+              throw new Error('Goal sheet is locked while awaiting manager approval. Wait for the manager to approve or return it.');
+            }
+          } else {
+            const editPolicy = assertEmployeeCanEditSheet(sheet);
+            if (!editPolicy.ok) throw new Error(editPolicy.message);
+          }
         }
 
         if (currentGoal?.isShared && !currentGoal.isOwner) {
@@ -846,11 +1005,22 @@ export const useDataStore = create<DataState>()(
           }
         }
 
-        if (updates.weightage != null && updates.weightage < BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL) {
-          throw new Error(`Minimum goal weightage is ${BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL}%.`);
+        if (updates.weightage != null) {
+          if (!Number.isFinite(updates.weightage)) {
+            throw new Error('Weightage must be a finite number.');
+          }
+          if (!Number.isInteger(updates.weightage)) {
+            throw new Error('Weightage must be a whole number.');
+          }
+          if (updates.weightage < BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL) {
+            throw new Error(`Minimum goal weightage is ${BUSINESS_RULES.MIN_WEIGHTAGE_PER_GOAL}%.`);
+          }
+          if (updates.weightage > BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL) {
+            throw new Error(`Maximum goal weightage is ${BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL}%.`);
+          }
         }
-        if (updates.weightage != null && updates.weightage > BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL) {
-          throw new Error(`Maximum goal weightage is ${BUSINESS_RULES.MAX_WEIGHTAGE_PER_GOAL}%.`);
+        if (updates.target != null && (!Number.isFinite(updates.target) || updates.target < 0)) {
+          throw new Error('Target value must be a non-negative number.');
         }
 
         if (updates.weightage != null && currentGoal) {
@@ -895,6 +1065,19 @@ export const useDataStore = create<DataState>()(
 
       submitQuarterlyUpdate: (updateData) => {
         const state = get();
+        // Defense-in-depth bounds check on actualAchievement.
+        const actual = updateData.actualAchievement;
+        if (actual != null) {
+          if (!Number.isFinite(actual)) {
+            throw new Error('Actual achievement must be a finite number.');
+          }
+          if (actual < 0) {
+            throw new Error('Actual achievement cannot be negative.');
+          }
+          if (actual > 1_000_000_000) {
+            throw new Error('Actual achievement is unrealistically large.');
+          }
+        }
         const existing = state.quarterlyUpdates.find(
           (update) =>
             update.goalId === updateData.goalId &&
@@ -978,6 +1161,26 @@ export const useDataStore = create<DataState>()(
         const commentPolicy = validateManagerCheckinComment(checkinData.comment);
         if (!commentPolicy.ok) throw new Error(commentPolicy.message);
 
+        // Defense in depth: the employee must report to this manager.
+        const employee = DEMO_ACCOUNTS.find((account) => account.id === checkinData.employeeId);
+        if (!employee) {
+          throw new Error('Employee not found.');
+        }
+        if (employee.managerId !== checkinData.managerId) {
+          throw new Error('Only the assigned manager can complete this check-in.');
+        }
+
+        // Prevent duplicate check-ins for the same employee/quarter/cycle.
+        const duplicate = get().managerCheckins.some(
+          (existing) =>
+            existing.employeeId === checkinData.employeeId &&
+            existing.quarter === checkinData.quarter &&
+            existing.cycleId === checkinData.cycleId
+        );
+        if (duplicate) {
+          throw new Error('A check-in already exists for this employee and quarter.');
+        }
+
         const checkin: ManagerCheckin = {
           ...checkinData,
           id: generateId(),
@@ -1001,10 +1204,23 @@ export const useDataStore = create<DataState>()(
       },
 
       addAuditLog: (logData) => {
+        const changedAt = now();
+        // Tamper-evidence: compute the chain hash synchronously so it is
+        // guaranteed to be persisted as part of the log record.
+        const payload = JSON.stringify({
+          action: logData.action,
+          entityId: logData.entityId,
+          changedBy: logData.changedBy,
+          ts: changedAt.toISOString(),
+        });
+        const integrityHash = computeAuditHashSync(payload, lastAuditHash);
+        lastAuditHash = integrityHash;
+
         const log: AuditLog = {
           ...logData,
           id: generateId(),
-          changedAt: now(),
+          changedAt,
+          integrityHash,
         };
         set((state) => ({
           auditLogs: [log, ...state.auditLogs],
@@ -1157,16 +1373,34 @@ export const useDataStore = create<DataState>()(
         set({
           thrustAreas: SEED_THRUST_AREAS,
           cycles: [SEED_CYCLE],
-          goalSheets: [...SEED_SHEETS],
-          goals: [...SEED_GOALS],
-          quarterlyUpdates: [...SEED_UPDATES],
-          managerCheckins: [...SEED_MANAGER_CHECKINS],
-          auditLogs: [...SEED_AUDIT_LOGS],
-          notifications: [...SEED_NOTIFICATIONS],
+          goalSheets: DEFAULT_GOAL_SHEETS,
+          goals: DEFAULT_GOALS,
+          quarterlyUpdates: [...SEED_UPDATES, ...EXTRA_UPDATES],
+          managerCheckins: [...SEED_MANAGER_CHECKINS, ...EXTRA_CHECKINS],
+          auditLogs: [...SEED_AUDIT_LOGS, ...EXTRA_AUDIT_LOGS],
+          notifications: [...SEED_NOTIFICATIONS, ...EXTRA_NOTIFICATIONS],
           escalationEvents: [],
         });
       },
     }),
-    { name: 'meridian-data' }
+    {
+      name: 'meridian-data',
+      version: 3,
+      migrate: (persisted, version) => {
+        // Version 0/undefined = pre-versioned stale data — wipe and use fresh defaults
+        if (!version || version < 2) return {} as DataState;
+        const persistedState = persisted as Partial<DataState> | undefined;
+        if (!persistedState) return {} as DataState;
+        return {
+          ...persistedState,
+          goalSheets: mergeMissingById(persistedState?.goalSheets, DEFAULT_GOAL_SHEETS),
+          goals: mergeMissingById(persistedState?.goals, DEFAULT_GOALS),
+          quarterlyUpdates: mergeMissingById(persistedState?.quarterlyUpdates, [...SEED_UPDATES, ...EXTRA_UPDATES]),
+          managerCheckins: mergeMissingById(persistedState?.managerCheckins, [...SEED_MANAGER_CHECKINS, ...EXTRA_CHECKINS]),
+          auditLogs: mergeMissingById(persistedState?.auditLogs, [...SEED_AUDIT_LOGS, ...EXTRA_AUDIT_LOGS]),
+          notifications: mergeMissingById(persistedState?.notifications, [...SEED_NOTIFICATIONS, ...EXTRA_NOTIFICATIONS]),
+        } as DataState;
+      },
+    }
   )
 );

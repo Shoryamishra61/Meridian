@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useDataStore } from '@/stores/data-store';
 import { useAuthStore } from '@/stores/auth-store';
@@ -41,23 +41,43 @@ export default function GlobalSearch() {
   const { goals } = useDataStore();
   const user = useAuthStore((s) => s.user);
 
-  // Cmd+K listener
+  const openSearch = useCallback(() => {
+    setQuery('');
+    setSelectedIndex(0);
+    setOpen(true);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
+
+  const toggleSearch = useCallback(() => {
+    setOpen((isOpen) => {
+      if (!isOpen) {
+        setQuery('');
+        setSelectedIndex(0);
+        setTimeout(() => inputRef.current?.focus(), 50);
+      }
+      return !isOpen;
+    });
+  }, []);
+
+  // Cmd/Ctrl+K listener
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        if (!open) {
-          setQuery('');
-          setSelectedIndex(0);
-          setTimeout(() => inputRef.current?.focus(), 50);
-        }
-        setOpen(!open);
+        toggleSearch();
       }
       if (e.key === 'Escape') setOpen(false);
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [open]);
+
+    const handleOpenSearch = () => openSearch();
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('meridian:open-search', handleOpenSearch);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('meridian:open-search', handleOpenSearch);
+    };
+  }, [openSearch, toggleSearch]);
 
   useEffect(() => {
     if (open) {
@@ -102,10 +122,10 @@ export default function GlobalSearch() {
       <div onClick={() => setOpen(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.5)', backdropFilter: 'blur(4px)' }} />
 
       {/* Modal */}
-      <div style={{ position: 'relative', width: '100%', maxWidth: '520px', margin: '0 16px', background: '#fff', borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 24px 48px rgba(0,0,0,0.15)', overflow: 'hidden' }}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: '520px', margin: '0 16px', background: 'var(--bg-surface)', borderRadius: '14px', border: '1px solid var(--border)', boxShadow: '0 24px 48px rgba(0,0,0,0.15)', overflow: 'hidden' }}>
         {/* Search input */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 18px', borderBottom: '1px solid #e2e8f0' }}>
-          <span style={{ fontSize: '18px', color: '#94a3b8' }}>🔍</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontSize: '18px', color: 'var(--text-tertiary)' }}>🔍</span>
           <input
             ref={inputRef}
             value={query}
@@ -115,15 +135,15 @@ export default function GlobalSearch() {
             }}
             onKeyDown={handleKeyDown}
             placeholder="Search pages, employees, goals..."
-            style={{ flex: 1, border: 'none', outline: 'none', fontSize: '15px', color: '#0f172a', fontFamily: 'inherit', background: 'transparent' }}
+            style={{ flex: 1, border: 'none', outline: 'none', fontSize: '15px', color: 'var(--text-primary)', fontFamily: 'inherit', background: 'transparent' }}
           />
-          <kbd style={{ padding: '2px 8px', borderRadius: '4px', background: '#f1f5f9', border: '1px solid #e2e8f0', fontSize: '11px', color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>ESC</kbd>
+          <kbd style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-muted)', border: '1px solid var(--border)', fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'ui-monospace, monospace' }}>ESC</kbd>
         </div>
 
         {/* Results */}
         <div style={{ maxHeight: '340px', overflowY: 'auto', padding: '6px 0' }}>
           {results.length === 0 ? (
-            <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: '14px' }}>No results found</div>
+            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' }}>No results found</div>
           ) : (
             results.map((r, i) => (
               <button
@@ -138,20 +158,20 @@ export default function GlobalSearch() {
               >
                 <span style={{ fontSize: '16px', width: '24px', textAlign: 'center' }}>{r.icon}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: '14px', fontWeight: 500, color: '#0f172a', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</p>
-                  <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>{r.subtitle}</p>
+                  <p style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</p>
+                  <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: 0 }}>{r.subtitle}</p>
                 </div>
-                <span style={{ fontSize: '10px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '2px 6px', borderRadius: '4px', background: '#f8fafc' }}>{r.type}</span>
+                <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '2px 6px', borderRadius: '4px', background: 'var(--bg-canvas)' }}>{r.type}</span>
               </button>
             ))
           )}
         </div>
 
         {/* Footer */}
-        <div style={{ display: 'flex', gap: '12px', padding: '10px 18px', borderTop: '1px solid #e2e8f0', background: '#f8fafc' }}>
-          <span style={{ fontSize: '11px', color: '#94a3b8' }}>↑↓ Navigate</span>
-          <span style={{ fontSize: '11px', color: '#94a3b8' }}>↵ Select</span>
-          <span style={{ fontSize: '11px', color: '#94a3b8' }}>ESC Close</span>
+        <div style={{ display: 'flex', gap: '12px', padding: '10px 18px', borderTop: '1px solid var(--border)', background: 'var(--bg-canvas)' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>↑↓ Navigate</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>↵ Select</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>ESC Close</span>
         </div>
       </div>
     </div>

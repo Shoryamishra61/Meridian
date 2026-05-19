@@ -29,9 +29,9 @@ export function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
   return (
     <>
       <style>{shimmerKeyframes}</style>
-      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden' }}>
         {/* Header */}
-        <div style={{ display: 'flex', gap: '16px', padding: '14px 20px', borderBottom: '2px solid #e2e8f0', background: '#f8fafc' }}>
+        <div style={{ display: 'flex', gap: '16px', padding: '14px 20px', borderBottom: '2px solid var(--border)', background: 'var(--bg-canvas)' }}>
           {Array.from({ length: cols }).map((_, i) => (
             <ShimmerBlock key={i} width={i === 0 ? '30%' : '20%'} height="12px" />
           ))}
@@ -55,7 +55,7 @@ export function CardSkeleton({ count = 4 }: { count?: number }) {
       <style>{shimmerKeyframes}</style>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" style={{ gap: '16px' }}>
         {Array.from({ length: count }).map((_, i) => (
-          <div key={i} style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '20px' }}>
+          <div key={i} style={{ background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border)', padding: '20px' }}>
             <ShimmerBlock width="60%" height="10px" style={{ marginBottom: '14px' }} />
             <ShimmerBlock width="40%" height="28px" style={{ marginBottom: '8px' }} />
             <ShimmerBlock width="80%" height="10px" />
@@ -91,7 +91,7 @@ export function GoalCardSkeleton({ count = 3 }: { count?: number }) {
       <style>{shimmerKeyframes}</style>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {Array.from({ length: count }).map((_, i) => (
-          <div key={i} style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '20px' }}>
+          <div key={i} style={{ background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border)', padding: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
               <ShimmerBlock width="50%" height="16px" />
               <ShimmerBlock width="60px" height="24px" />

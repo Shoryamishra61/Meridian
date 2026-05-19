@@ -40,3 +40,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# logs
+next-start.err.log
+next-start.out.log
+
+# scratch / temp
+/scratch/
+/qa-screenshots/

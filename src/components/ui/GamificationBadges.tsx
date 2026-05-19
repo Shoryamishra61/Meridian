@@ -9,6 +9,7 @@ import { useMemo } from 'react';
 import { useDataStore } from '@/stores/data-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { calculateProgressScore } from '@/lib/calculations';
+import { cn } from '@/lib/utils';
 
 interface Badge {
   id: string;
@@ -32,10 +33,8 @@ export default function GamificationBadges({ userId }: { userId?: string }) {
     const myGoals = goals.filter((g) => mySheets.some((s) => s.id === g.sheetId));
     const myUpdates = quarterlyUpdates.filter((u) => myGoals.some((g) => g.id === u.goalId));
 
-    // Check-in streak
     const completedQuarters = new Set(myUpdates.filter((u) => u.actualAchievement !== null).map((u) => u.quarter)).size;
 
-    // Achievement scores
     const scores = myGoals.map((g) => {
       const upd = myUpdates.find((u) => u.goalId === g.id);
       if (!upd || upd.actualAchievement === null) return 0;
@@ -58,8 +57,8 @@ export default function GamificationBadges({ userId }: { userId?: string }) {
         title: 'Goal Crusher',
         description: 'Avg achievement ≥ 100%',
         earned: avgScore >= 100,
-        color: '#d97706',
-        bgColor: '#fffbeb',
+        color: 'var(--warning)',
+        bgColor: 'var(--warning-bg)',
       },
       {
         id: 'streak-master',
@@ -67,8 +66,8 @@ export default function GamificationBadges({ userId }: { userId?: string }) {
         title: 'Streak Master',
         description: `${completedQuarters} quarter check-ins completed`,
         earned: completedQuarters >= 2,
-        color: '#dc2626',
-        bgColor: '#fef2f2',
+        color: 'var(--danger)',
+        bgColor: 'var(--danger-bg)',
       },
       {
         id: 'alignment-champion',
@@ -76,8 +75,8 @@ export default function GamificationBadges({ userId }: { userId?: string }) {
         title: 'Alignment Champion',
         description: 'Contributing to shared KPIs',
         earned: hasSharedGoal,
-        color: '#2563eb',
-        bgColor: '#eff6ff',
+        color: 'var(--brand)',
+        bgColor: 'var(--brand-light)',
       },
       {
         id: 'safety-hero',
@@ -85,8 +84,8 @@ export default function GamificationBadges({ userId }: { userId?: string }) {
         title: 'Safety Hero',
         description: 'Zero-based goals at 100%',
         earned: hasZeroBased && zeroBasedPerfect,
-        color: '#059669',
-        bgColor: '#ecfdf5',
+        color: 'var(--success)',
+        bgColor: 'var(--success-bg)',
       },
       {
         id: 'first-mover',
@@ -94,8 +93,8 @@ export default function GamificationBadges({ userId }: { userId?: string }) {
         title: 'First Mover',
         description: 'Goal sheet submitted on time',
         earned: allSubmitted,
-        color: '#7c3aed',
-        bgColor: '#f5f3ff',
+        color: 'var(--brand)',
+        bgColor: 'var(--brand-light)',
       },
       {
         id: 'overachiever',
@@ -103,42 +102,54 @@ export default function GamificationBadges({ userId }: { userId?: string }) {
         title: 'Overachiever',
         description: 'Achievement above 90%',
         earned: avgScore >= 90,
-        color: '#0891b2',
-        bgColor: '#ecfeff',
+        color: 'var(--success)',
+        bgColor: 'var(--success-bg)',
       },
     ];
   }, [targetId, goals, goalSheets, quarterlyUpdates]);
 
   const earnedCount = badges.filter((b) => b.earned).length;
+  const progressPct = badges.length ? Math.round((earnedCount / badges.length) * 100) : 0;
 
   return (
-    <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#0f172a', margin: '0 0 2px 0' }}>Achievement Badges</h3>
-          <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>{earnedCount}/{badges.length} earned</p>
+    <div className="card flex flex-col justify-between h-full" style={{ padding: '24px' }}>
+      <div className="flex items-start justify-between gap-3" style={{ marginBottom: '14px' }}>
+        <div className="min-w-0">
+          <h2 style={{ fontSize: '16px', margin: 0, lineHeight: 1.25 }}>Achievement Badges</h2>
+          <p className="text-[12px] text-[var(--text-secondary)]" style={{ marginTop: '4px' }}>
+            {earnedCount} of {badges.length} earned
+          </p>
         </div>
-        {/* Progress bar */}
-        <div style={{ width: '80px', height: '6px', borderRadius: '3px', background: '#f1f5f9', overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${(earnedCount / badges.length) * 100}%`, background: '#2563eb', borderRadius: '3px', transition: 'width 500ms' }} />
+        <div className="w-20 shrink-0 pt-1">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-muted)]">
+            <div
+              className="h-full rounded-full bg-[var(--brand)] transition-all duration-500"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 shrink-0">
         {badges.map((b) => (
           <div
             key={b.id}
-            style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
-              padding: '12px 8px', borderRadius: '10px', textAlign: 'center',
-              background: b.earned ? b.bgColor : '#f8fafc',
-              border: `1px solid ${b.earned ? b.color + '30' : '#e2e8f0'}`,
-              opacity: b.earned ? 1 : 0.5,
-              transition: 'all 200ms',
-            }}
+            title={b.description}
+            className={cn(
+              'flex flex-col items-center justify-center gap-2 rounded-[6px] border px-2 py-3.5 text-center transition-colors',
+              b.earned ? 'shadow-sm' : 'border-[var(--border)] bg-[var(--bg-muted)]'
+            )}
+            style={b.earned ? { background: b.bgColor, borderColor: `color-mix(in srgb, ${b.color} 32%, var(--border) 68%)` } : undefined}
           >
-            <span style={{ fontSize: '22px', filter: b.earned ? 'none' : 'grayscale(1)' }}>{b.icon}</span>
-            <span style={{ fontSize: '11px', fontWeight: 600, color: b.earned ? b.color : '#94a3b8', lineHeight: 1.2 }}>{b.title}</span>
+            <span className={cn('text-[20px] leading-none', !b.earned && 'opacity-50 grayscale')}>{b.icon}</span>
+            <span
+              className={cn(
+                'text-[11px] font-semibold leading-tight line-clamp-2',
+                b.earned ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'
+              )}
+            >
+              {b.title}
+            </span>
           </div>
         ))}
       </div>

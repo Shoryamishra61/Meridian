@@ -16,6 +16,7 @@ import {
   BUSINESS_RULES,
   DEMO_ACCOUNTS,
   getCheckinQuarterForDate,
+  getNextWindowCountdown,
   getWindowMessageForDate,
   PROGRESS_STATUS_CONFIG,
   UOM_LABELS,
@@ -23,8 +24,10 @@ import {
   type Quarter,
 } from '@/lib/constants';
 import { calculateProgressScore, formatScore, getScoreColor } from '@/lib/calculations';
+import { MAX_ACTUAL_ACHIEVEMENT } from '@/lib/validations';
 import { validateAchievementInput, validateQuarterWindow } from '@/server/domain/goal-policy';
 import { formatDate } from '@/lib/utils';
+import { analyzeSentiment } from '@/lib/ai-engine';
 
 const QUARTERS: Quarter[] = ['Q1', 'Q2', 'Q3', 'Q4'];
 
@@ -32,10 +35,26 @@ const QUARTERS: Quarter[] = ['Q1', 'Q2', 'Q3', 'Q4'];
 const I = {
   input: {
     width: '100%', height: '36px', padding: '0 10px',
-    borderRadius: '8px', border: '1.5px solid #cbd5e1', background: '#f8fafc',
-    fontSize: '13px', color: '#0f172a', outline: 'none',
+    borderRadius: '8px', border: '1.5px solid var(--border)', background: 'var(--bg-canvas)',
+    fontSize: '13px', color: 'var(--text-primary)', outline: 'none',
   } as React.CSSProperties,
-  label: { fontSize: '11px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' as const, letterSpacing: '0.04em' } as React.CSSProperties,
+  label: { fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase' as const, letterSpacing: '0.04em' } as React.CSSProperties,
+  warningBanner: {
+    padding: '14px 18px',
+    marginBottom: '16px',
+    borderRadius: '10px',
+    background: 'color-mix(in srgb, var(--warning) 14%, var(--bg-surface) 86%)',
+    border: '1px solid color-mix(in srgb, var(--warning) 38%, var(--border) 62%)',
+    borderLeft: '3px solid var(--warning)',
+  } as React.CSSProperties,
+  successBanner: {
+    padding: '14px 18px',
+    marginBottom: '16px',
+    borderRadius: '10px',
+    background: 'color-mix(in srgb, var(--success) 14%, var(--bg-surface) 86%)',
+    border: '1px solid color-mix(in srgb, var(--success) 38%, var(--border) 62%)',
+    borderLeft: '3px solid var(--success)',
+  } as React.CSSProperties,
 };
 
 interface GoalCheckinFormState {
@@ -44,19 +63,6 @@ interface GoalCheckinFormState {
   status: ProgressStatus;
   notes: string;
   selfProgress: string;
-}
-
-function getNextWindowCountdown(date: Date): string {
-  const windows = [
-    { label: 'Q1', opens: new Date('2025-07-01') },
-    { label: 'Q2', opens: new Date('2025-10-01') },
-    { label: 'Q3', opens: new Date('2026-01-01') },
-    { label: 'Q4', opens: new Date('2026-03-01') },
-  ];
-  const next = windows.find((window) => date < window.opens);
-  if (!next) return 'Next cycle opens in May.';
-  const days = Math.ceil((next.opens.getTime() - date.getTime()) / 86400000);
-  return `${next.label} opens in ${days} days.`;
 }
 
 export default function CheckinsPage() {
@@ -107,39 +113,59 @@ function EmployeeCheckin() {
     const validationError = myGoals.map((goal) => {
       const data = getGoalFormData(goal.id);
       const actual = goal.uomType === 'TIMELINE' ? null : data.actual.trim() === '' ? null : Number(data.actual);
+      if (actual != null) {
+        if (!Number.isFinite(actual)) {
+          return { goalTitle: goal.title, message: 'Actual achievement must be a number.' };
+        }
+        if (actual < 0) {
+          return { goalTitle: goal.title, message: 'Actual achievement cannot be negative.' };
+        }
+        if (actual > MAX_ACTUAL_ACHIEVEMENT) {
+          return { goalTitle: goal.title, message: 'Actual achievement is unrealistically large.' };
+        }
+      }
       const policy = validateAchievementInput({ uomType: goal.uomType, status: data.status, actualAchievement: actual, completionDate: data.completionDate ? new Date(data.completionDate) : null });
       return policy.ok ? null : { goalTitle: goal.title, message: policy.message };
     }).find(Boolean);
 
     if (validationError) { toast.error('Check-in needs actual achievement', { description: `${validationError.goalTitle}: ${validationError.message}` }); return; }
 
-    myGoals.forEach((goal) => {
-      const data = getGoalFormData(goal.id);
-      const actual = goal.uomType === 'TIMELINE' ? 0 : Number(data.actual || 0);
-      const computedScore = calculateProgressScore({ uomType: goal.uomType, target: goal.target, actual, targetDate: goal.targetDate, completionDate: data.completionDate || null });
-      submitQuarterlyUpdate({
-        goalId: goal.id, quarter: selectedQuarter, cycleId: activeCycle.id, actualAchievement: actual,
-        completionDate: data.completionDate ? new Date(data.completionDate) : null, status: data.status,
-        computedScore, notes: [data.selfProgress ? `Self progress: ${data.selfProgress}%` : '', data.notes].filter(Boolean).join(' — ') || null, updatedBy: user.id,
+    try {
+      myGoals.forEach((goal) => {
+        const data = getGoalFormData(goal.id);
+        const actual = goal.uomType === 'TIMELINE' ? 0 : Number(data.actual || 0);
+        const computedScore = calculateProgressScore({ uomType: goal.uomType, target: goal.target, actual, targetDate: goal.targetDate, completionDate: data.completionDate || null });
+        submitQuarterlyUpdate({
+          goalId: goal.id, quarter: selectedQuarter, cycleId: activeCycle.id, actualAchievement: actual,
+          completionDate: data.completionDate ? new Date(data.completionDate) : null, status: data.status,
+          computedScore, notes: [data.selfProgress ? `Self progress: ${data.selfProgress}%` : '', data.notes].filter(Boolean).join(' — ') || null, updatedBy: user.id,
+        });
       });
-    });
-    toast.success(`${selectedQuarter} check-in saved`, { description: 'Progress scores were computed using the BRD formulas.' });
+      toast.success(`${selectedQuarter} check-in saved`, { description: 'Progress scores were computed using the BRD formulas.' });
+    } catch (error) {
+      toast.error('Could not save check-in', {
+        description: error instanceof Error ? error.message : 'Please review your inputs and try again.',
+      });
+    }
   };
 
   /* ── Empty State ── */
   if (!sheet) {
     return (
-      <div>
-        <div style={{ marginBottom: '24px' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0' }}>Quarterly Check-ins</h1>
-          <p style={{ fontSize: '14px', color: '#94a3b8', margin: 0 }}>{getWindowMessageForDate(currentDate)}</p>
-        </div>
+      <div className="animate-in app-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <header className="app-page-header">
+          <div>
+            <p className="app-page-eyebrow">Performance cycle</p>
+            <h1 style={{ margin: '0 0 6px 0' }}>Quarterly Check-ins</h1>
+            <p className="app-page-meta">{getWindowMessageForDate(currentDate)}</p>
+          </div>
+        </header>
         <div className="card" style={{ padding: '60px 40px', textAlign: 'center', maxWidth: '560px', margin: '40px auto 0' }}>
-          <div style={{ width: '56px', height: '56px', margin: '0 auto 20px', borderRadius: '16px', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: '56px', height: '56px', margin: '0 auto 20px', borderRadius: '16px', background: 'var(--brand-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 15V3M12 15L8 11M12 15L16 11M2 17L2.621 19.485C2.72915 19.9177 2.97882 20.3018 3.33033 20.5763C3.68184 20.8508 4.11501 20.9999 4.561 21H19.439C19.885 20.9999 20.3182 20.8508 20.6697 20.5763C21.0212 20.3018 21.2708 19.9177 21.379 19.485L22 17" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </div>
-          <p style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>Goals are not approved yet</p>
-          <p style={{ fontSize: '14px', color: '#64748b', margin: 0, lineHeight: '1.6' }}>
+          <p style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px 0' }}>Goals are not approved yet</p>
+          <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.6' }}>
             Achievement capture opens after your manager approves and locks your goal sheet.
           </p>
         </div>
@@ -149,45 +175,46 @@ function EmployeeCheckin() {
 
   /* ── Main View ── */
   return (
-    <div>
+    <div className="animate-in app-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+      <header className="app-page-header">
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0' }}>Quarterly Check-ins</h1>
-          <p style={{ fontSize: '14px', color: '#94a3b8', margin: 0 }}>
-            {getWindowMessageForDate(currentDate)} • Demo date {formatDate(currentDate)}
+          <p className="app-page-eyebrow">Performance cycle</p>
+          <h1 style={{ margin: '0 0 6px 0' }}>Quarterly Check-ins</h1>
+          <p className="app-page-meta">
+            <span>{getWindowMessageForDate(currentDate)}</span>
+            <span className="sep">·</span>
+            <span>Demo date {formatDate(currentDate)}</span>
           </p>
         </div>
-        <button onClick={handleSave} disabled={!isWindowOpen || locked}
-          style={{
-            height: '40px', padding: '0 20px', borderRadius: '10px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: isWindowOpen && !locked ? 'pointer' : 'not-allowed',
-            background: isWindowOpen && !locked ? '#2563eb' : '#e2e8f0', color: isWindowOpen && !locked ? '#ffffff' : '#94a3b8',
-          }}>
-          Save check-in
-        </button>
-      </div>
+        <div className="app-page-actions">
+          <button onClick={handleSave} disabled={!isWindowOpen || locked} className="btn-primary">
+            Save check-in
+          </button>
+        </div>
+      </header>
 
       {/* Quarter Selector */}
       <QuarterSelector selectedQuarter={selectedQuarter} activeQuarter={activeQuarter} onChange={setSelectedQuarter} />
 
       {/* Warnings */}
       {!isWindowOpen && (
-        <div style={{ padding: '14px 18px', marginBottom: '16px', borderRadius: '10px', background: '#fffbeb', border: '1px solid #fde68a', borderLeft: '3px solid #f59e0b' }}>
-          <p style={{ fontSize: '14px', fontWeight: 600, color: '#92400e', margin: '0 0 2px 0' }}>This quarter is not open for achievement capture.</p>
-          <p style={{ fontSize: '13px', color: '#a16207', margin: 0 }}>{getNextWindowCountdown(currentDate)} Use the debug date selector only during internal demo prep.</p>
+        <div style={I.warningBanner}>
+          <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--warning)', margin: '0 0 2px 0' }}>This quarter is not open for achievement capture.</p>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>{getNextWindowCountdown(currentDate)} Use the debug date selector only during internal demo prep.</p>
         </div>
       )}
       {locked && (
-        <div style={{ padding: '14px 18px', marginBottom: '16px', borderRadius: '10px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderLeft: '3px solid #22c55e' }}>
-          <p style={{ fontSize: '14px', fontWeight: 600, color: '#166534', margin: '0 0 2px 0' }}>{selectedQuarter} check-in is complete.</p>
-          <p style={{ fontSize: '13px', color: '#15803d', margin: 0 }}>Manager comments have locked this quarter&apos;s achievement data.</p>
+        <div style={I.successBanner}>
+          <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--success)', margin: '0 0 2px 0' }}>{selectedQuarter} check-in is complete.</p>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>Manager comments have locked this quarter&apos;s achievement data.</p>
         </div>
       )}
 
       {/* Goals Table */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {/* Table Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1.5fr 1fr 1fr 1fr', gap: '12px', padding: '12px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1.5fr 1fr 1fr 1fr', gap: '12px', padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-canvas)' }}>
           <span style={I.label}>Goal</span>
           <span style={{ ...I.label, textAlign: 'right' }}>Planned</span>
           <span style={I.label}>Actual</span>
@@ -206,16 +233,16 @@ function EmployeeCheckin() {
           return (
             <div key={goal.id} style={{
               display: 'grid', gridTemplateColumns: '3fr 1fr 1.5fr 1fr 1fr 1fr', gap: '12px', alignItems: 'start',
-              padding: '16px 20px', borderBottom: index < myGoals.length - 1 ? '1px solid #f1f5f9' : 'none',
+              padding: '16px 20px', borderBottom: index < myGoals.length - 1 ? '1px solid var(--border)' : 'none',
             }}>
               {/* Goal info */}
               <div style={{ minWidth: 0 }}>
-                <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a', margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{goal.title}</p>
-                <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>{UOM_LABELS[goal.uomType]}</p>
+                <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 2px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{goal.title}</p>
+                <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: 0 }}>{UOM_LABELS[goal.uomType]}</p>
               </div>
 
               {/* Planned */}
-              <span style={{ fontSize: '14px', color: '#475569', textAlign: 'right', fontVariantNumeric: 'tabular-nums', paddingTop: '2px' }}>
+              <span style={{ fontSize: '14px', color: 'var(--text-secondary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', paddingTop: '2px' }}>
                 {goal.uomType === 'TIMELINE' && goal.targetDate
                   ? new Date(goal.targetDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
                   : goal.target}
@@ -225,34 +252,37 @@ function EmployeeCheckin() {
               <div>
                 {goal.uomType === 'TIMELINE' ? (
                   <input type="date" value={data.completionDate} onChange={(e) => updateField(goal.id, 'completionDate', e.target.value)}
-                    disabled={disabled} style={{ ...I.input, opacity: disabled ? 0.5 : 1 }} />
+                    disabled={disabled} aria-label={`Completion date for ${goal.title}`} style={{ ...I.input, opacity: disabled ? 0.5 : 1 }} />
                 ) : (
                   <input type="number" value={data.actual} onChange={(e) => updateField(goal.id, 'actual', e.target.value)}
-                    disabled={disabled} min={0} style={{ ...I.input, opacity: disabled ? 0.5 : 1 }} />
+                    disabled={disabled} min={0} max={MAX_ACTUAL_ACHIEVEMENT} step="any"
+                    aria-label={`Actual achievement for ${goal.title}`} style={{ ...I.input, opacity: disabled ? 0.5 : 1 }} />
                 )}
                 <input value={data.notes} onChange={(e) => updateField(goal.id, 'notes', e.target.value)}
                   disabled={disabled} placeholder="Note…"
-                  style={{ width: '100%', height: '28px', padding: '0 10px', marginTop: '6px', borderRadius: '6px', border: '1px solid transparent', background: 'transparent', fontSize: '12px', color: '#64748b', outline: 'none', opacity: disabled ? 0.5 : 1 }} />
+                  aria-label={`Notes for ${goal.title}`}
+                  style={{ width: '100%', height: '28px', padding: '0 10px', marginTop: '6px', borderRadius: '6px', border: '1px solid transparent', background: 'transparent', fontSize: '12px', color: 'var(--text-secondary)', outline: 'none', opacity: disabled ? 0.5 : 1 }} />
               </div>
 
               {/* Self Rate */}
               <input type="number" value={data.selfProgress}
                 onChange={(e) => { const v = e.target.value.replace(/[^\d]/g, '').slice(0, 3); updateField(goal.id, 'selfProgress', v ? String(Math.min(100, Number(v))) : ''); }}
                 disabled={disabled} min={0} max={100} placeholder="0-100"
+                aria-label={`Self-rated progress for ${goal.title}`}
                 style={{ ...I.input, opacity: disabled ? 0.5 : 1 }} />
 
               {/* Status */}
               <select value={data.status} onChange={(e) => updateField(goal.id, 'status', e.target.value as ProgressStatus)}
-                disabled={disabled} style={{ ...I.input, opacity: disabled ? 0.5 : 1 }}>
+                disabled={disabled} aria-label={`Status for ${goal.title}`} style={{ ...I.input, opacity: disabled ? 0.5 : 1 }}>
                 <option value="NOT_STARTED">Not Started</option>
                 <option value="ON_TRACK">On Track</option>
                 <option value="COMPLETED">Completed</option>
               </select>
 
-              {/* Score */}
+              {/* Score — For tracking only */}
               <div style={{ textAlign: 'right' }}>
                 <p className={getScoreColor(score)} style={{ fontSize: '16px', fontWeight: 700, fontVariantNumeric: 'tabular-nums', margin: '0 0 2px 0' }}>{formatScore(score)}</p>
-                <p style={{ fontSize: '11px', color: '#cbd5e1', margin: 0 }}>tracking</p>
+                <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: 0, fontStyle: 'italic' }}>For tracking only</p>
               </div>
             </div>
           );
@@ -294,21 +324,26 @@ function ManagerCheckin() {
   };
 
   return (
-    <div>
+    <div className="animate-in app-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Header */}
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0' }}>Team Check-ins</h1>
-        <p style={{ fontSize: '14px', color: '#94a3b8', margin: 0 }}>
-          Planned vs Actual review • {getWindowMessageForDate(currentDate)}
-        </p>
-      </div>
+      <header className="app-page-header">
+        <div>
+          <p className="app-page-eyebrow">Manager workspace</p>
+          <h1 style={{ margin: '0 0 6px 0' }}>Team Check-ins</h1>
+          <p className="app-page-meta">
+            <span>Planned vs Actual review</span>
+            <span className="sep">·</span>
+            <span>{getWindowMessageForDate(currentDate)}</span>
+          </p>
+        </div>
+      </header>
 
       <QuarterSelector selectedQuarter={selectedQuarter} activeQuarter={activeQuarter} onChange={setSelectedQuarter} />
 
       {!isWindowOpen && (
-        <div style={{ padding: '14px 18px', marginBottom: '16px', borderRadius: '10px', background: '#fffbeb', border: '1px solid #fde68a', borderLeft: '3px solid #f59e0b' }}>
-          <p style={{ fontSize: '14px', fontWeight: 600, color: '#92400e', margin: '0 0 2px 0' }}>Manager check-in is outside the active window.</p>
-          <p style={{ fontSize: '13px', color: '#a16207', margin: 0 }}>Switch the demo date to the selected quarter month before locking check-in comments.</p>
+        <div style={I.warningBanner}>
+          <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--warning)', margin: '0 0 2px 0' }}>Manager check-in is outside the active window.</p>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>Switch the demo date to the selected quarter month before locking check-in comments.</p>
         </div>
       )}
 
@@ -322,51 +357,51 @@ function ManagerCheckin() {
           return (
             <div key={member.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
               {/* Member Header */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#eff6ff', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb', flexShrink: 0 }}>
+                  <span style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--brand-light)', fontSize: '13px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--brand)', flexShrink: 0 }}>
                     {member.avatarInitials}
                   </span>
                   <div>
-                    <p style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a', margin: '0 0 1px 0' }}>{member.name}</p>
-                    <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>
+                    <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 1px 0' }}>{member.name}</p>
+                    <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', margin: 0 }}>
                       {memberGoals.length} goals • {existingCheckin ? 'check-in complete' : 'comment pending'}
                     </p>
                   </div>
                 </div>
                 <span style={{
                   padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
-                  background: existingCheckin ? '#f0fdf4' : '#fffbeb',
-                  color: existingCheckin ? '#16a34a' : '#f59e0b',
+                  background: existingCheckin ? 'color-mix(in srgb, var(--success) 18%, transparent)' : 'color-mix(in srgb, var(--warning) 18%, transparent)',
+                  color: existingCheckin ? 'var(--success)' : 'var(--warning)',
                 }}>{existingCheckin ? 'Locked' : 'Open'}</span>
               </div>
 
               {/* Goals Table */}
-              <div style={{ background: '#fafbfc' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '3fr 1.5fr 1.5fr 1.5fr 1fr', gap: '8px', padding: '10px 20px', borderBottom: '1px solid #e2e8f0' }}>
-                  <span style={I.label}>Goal</span>
-                  <span style={{ ...I.label, textAlign: 'right' }}>Planned</span>
-                  <span style={{ ...I.label, textAlign: 'right' }}>Actual</span>
-                  <span style={{ ...I.label, textAlign: 'right' }}>Score</span>
-                  <span style={{ ...I.label, textAlign: 'right' }}>State</span>
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '3fr 1.2fr 1.2fr 1.2fr 1.2fr', gap: '12px', padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface-hover)' }}>
+                  <span style={{ ...I.label, color: 'var(--text-secondary)' }}>Goal</span>
+                  <span style={{ ...I.label, textAlign: 'right', color: 'var(--text-secondary)' }}>Planned</span>
+                  <span style={{ ...I.label, textAlign: 'right', color: 'var(--text-secondary)' }}>Actual</span>
+                  <span style={{ ...I.label, textAlign: 'right', color: 'var(--text-secondary)' }}>Score</span>
+                  <span style={{ ...I.label, textAlign: 'right', color: 'var(--text-secondary)' }}>State</span>
                 </div>
                 {memberGoals.length === 0 ? (
-                  <p style={{ padding: '16px 20px', fontSize: '13px', color: '#94a3b8', margin: 0 }}>No approved goals yet.</p>
+                  <p style={{ padding: '16px 20px', fontSize: '13px', color: 'var(--text-tertiary)', margin: 0 }}>No approved goals yet.</p>
                 ) : (
                   memberGoals.map((goal, idx) => {
                     const update = quarterlyUpdates.find((u) => u.goalId === goal.id && u.quarter === selectedQuarter);
                     return (
                       <div key={goal.id} style={{
-                        display: 'grid', gridTemplateColumns: '3fr 1.5fr 1.5fr 1.5fr 1fr', gap: '8px', alignItems: 'center',
-                        padding: '10px 20px', borderBottom: idx < memberGoals.length - 1 ? '1px solid #f1f5f9' : 'none',
+                        display: 'grid', gridTemplateColumns: '3fr 1.2fr 1.2fr 1.2fr 1.2fr', gap: '12px', alignItems: 'center',
+                        padding: '14px 20px', borderBottom: idx < memberGoals.length - 1 ? '1px solid var(--border)' : 'none',
                       }}>
-                        <span style={{ fontSize: '13px', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{goal.title}</span>
-                        <span style={{ fontSize: '13px', color: '#475569', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{goal.target}</span>
-                        <span style={{ fontSize: '13px', color: '#475569', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{update?.actualAchievement ?? '—'}</span>
-                        <span className={update?.computedScore != null ? getScoreColor(update.computedScore) : ''} style={{ fontSize: '13px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                        <span style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{goal.title}</span>
+                        <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{goal.target}</span>
+                        <span style={{ fontSize: '14px', fontWeight: 600, color: update?.actualAchievement != null ? 'var(--text-primary)' : 'var(--text-muted)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{update?.actualAchievement ?? '—'}</span>
+                        <span className={update?.computedScore != null ? getScoreColor(update.computedScore) : ''} style={{ fontSize: '14px', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: update?.computedScore == null ? 'var(--text-muted)' : undefined }}>
                           {update?.computedScore != null ? formatScore(update.computedScore) : '—'}
                         </span>
-                        <span style={{ fontSize: '12px', color: '#94a3b8', textAlign: 'right' }}>{update ? PROGRESS_STATUS_CONFIG[update.status].label : '—'}</span>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: update ? 'var(--text-secondary)' : 'var(--text-muted)', textAlign: 'right' }}>{update ? PROGRESS_STATUS_CONFIG[update.status].label : '—'}</span>
                       </div>
                     );
                   })
@@ -376,9 +411,21 @@ function ManagerCheckin() {
               {/* Comment Section */}
               <div style={{ padding: '16px 20px' }}>
                 {existingCheckin ? (
-                  <div style={{ padding: '12px 16px', borderRadius: '10px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                    <p style={{ fontSize: '11px', fontWeight: 600, color: '#94a3b8', margin: '0 0 6px 0', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Manager Comment</p>
-                    <p style={{ fontSize: '13px', color: '#475569', margin: 0, lineHeight: '1.5' }}>{existingCheckin.comment}</p>
+                  <div style={{ padding: '12px 16px', borderRadius: '10px', background: 'var(--bg-canvas)', border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                      <p style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Manager Comment</p>
+                      {(() => {
+                        const sentiment = analyzeSentiment(existingCheckin.comment);
+                        const config = { positive: { bg: 'var(--success-bg)', color: 'var(--success)', icon: '👍' }, neutral: { bg: 'var(--bg-muted)', color: 'var(--text-secondary)', icon: '➖' }, negative: { bg: 'var(--danger-bg)', color: 'var(--danger)', icon: '⚠️' } };
+                        const s = config[sentiment.label];
+                        return (
+                          <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', background: s.bg, color: s.color }}>
+                            {s.icon} {sentiment.label}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0, lineHeight: '1.5' }}>{existingCheckin.comment}</p>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', gap: '10px' }}>
@@ -386,13 +433,13 @@ function ManagerCheckin() {
                       value={comments[member.id] || ''}
                       onChange={(e) => setComments((prev) => ({ ...prev, [member.id]: e.target.value }))}
                       rows={2} placeholder="Document coaching discussion, blockers, and next actions..."
-                      style={{ flex: 1, padding: '10px 14px', borderRadius: '10px', border: '1.5px solid #cbd5e1', background: '#f8fafc', fontSize: '13px', color: '#0f172a', outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: '1.5' }}
+                      style={{ flex: 1, padding: '10px 14px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--bg-canvas)', fontSize: '13px', color: 'var(--text-primary)', outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: '1.5' }}
                     />
                     <button onClick={() => handleSaveComment(member.id)} disabled={!isWindowOpen}
                       style={{
                         height: '40px', padding: '0 18px', borderRadius: '10px', border: 'none', alignSelf: 'flex-end',
                         fontSize: '13px', fontWeight: 600, cursor: isWindowOpen ? 'pointer' : 'not-allowed',
-                        background: isWindowOpen ? '#2563eb' : '#e2e8f0', color: isWindowOpen ? '#ffffff' : '#94a3b8',
+                        background: isWindowOpen ? 'var(--brand)' : 'var(--bg-muted)', color: isWindowOpen ? 'var(--text-inverse)' : 'var(--text-tertiary)',
                       }}>
                       Complete
                     </button>
@@ -416,9 +463,9 @@ function QuarterSelector({ selectedQuarter, activeQuarter, onChange }: {
         <button key={q} onClick={() => onChange(q)}
           style={{
             height: '38px', padding: '0 20px', borderRadius: '10px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-            border: activeQuarter === q ? '1.5px solid #22c55e' : '1.5px solid transparent',
-            background: selectedQuarter === q ? '#0f172a' : '#f1f5f9',
-            color: selectedQuarter === q ? '#ffffff' : '#64748b',
+            border: activeQuarter === q ? '1.5px solid var(--success)' : '1.5px solid transparent',
+            background: selectedQuarter === q ? 'var(--brand)' : 'var(--bg-muted)',
+            color: selectedQuarter === q ? 'var(--text-inverse)' : 'var(--text-secondary)',
             transition: 'all 150ms',
           }}>
           {q}

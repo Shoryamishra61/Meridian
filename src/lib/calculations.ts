@@ -73,7 +73,7 @@ export function calculateProgressScore(input: ScoreInput): number {
     }
 
     case 'TIMELINE': {
-      // Completion date vs. Deadline
+      // Completion date vs. Deadline — UTC normalized to prevent timezone issues
       if (!targetDate || !completionDate) return 0;
 
       const deadline = targetDate instanceof Date ? targetDate : new Date(targetDate);
@@ -81,8 +81,12 @@ export function calculateProgressScore(input: ScoreInput): number {
 
       if (isNaN(deadline.getTime()) || isNaN(completed.getTime())) return 0;
 
+      // Normalize to UTC midnight for timezone-safe comparison
+      const deadlineUTC = Date.UTC(deadline.getFullYear(), deadline.getMonth(), deadline.getDate());
+      const completedUTC = Date.UTC(completed.getFullYear(), completed.getMonth(), completed.getDate());
+
       // Completed on or before deadline = 100%
-      if (completed <= deadline) return 1.0;
+      if (completedUTC <= deadlineUTC) return 1.0;
 
       // After deadline = 0% (strict interpretation from PS)
       return 0.0;

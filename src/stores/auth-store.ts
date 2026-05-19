@@ -25,6 +25,10 @@ interface AuthState {
   user: DemoUser | null;
   /** Whether the user is authenticated */
   isAuthenticated: boolean;
+  /** Whether persisted auth has loaded on the client */
+  hasHydrated: boolean;
+  /** Mark persisted auth hydration complete */
+  setHasHydrated: (value: boolean) => void;
   /** Login with email (demo mode — no password verification) */
   login: (email: string) => boolean;
   /** Hydrate from a production SSO session */
@@ -42,6 +46,11 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       isAuthenticated: false,
+      hasHydrated: false,
+
+      setHasHydrated: (value: boolean) => {
+        set({ hasHydrated: value });
+      },
 
       login: (email: string) => {
         const normalizedLogin = email.trim().toLowerCase();
@@ -89,6 +98,14 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'meridian-auth',
+      version: 2,
+      migrate: (persisted, version) => {
+        if (!version || version < 2) return {} as AuthState;
+        return (persisted ?? {}) as AuthState;
+      },
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );

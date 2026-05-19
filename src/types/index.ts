@@ -168,6 +168,8 @@ export interface AuditLog {
   changedAt: Date;
   ipAddress: string | null;
   userAgent: string | null;
+  /** DJB2 chain hash for tamper evidence (links to previous entry's hash). */
+  integrityHash?: string;
   // Joined
   changedByUser?: User;
 }

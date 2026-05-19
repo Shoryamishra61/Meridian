@@ -56,7 +56,9 @@ export function validateGoalSheetForSubmission(goals: Pick<Goal, 'title' | 'weig
     );
   }
 
-  const total = goals.reduce((sum, goal) => sum + goal.weightage, 0);
+  const rawTotal = goals.reduce((sum, goal) => sum + goal.weightage, 0);
+  // Float-safe comparison: round to 2 decimal places to avoid IEEE 754 precision issues
+  const total = Math.round(rawTotal * 100) / 100;
   if (total !== BUSINESS_RULES.TOTAL_WEIGHTAGE) {
     const delta = BUSINESS_RULES.TOTAL_WEIGHTAGE - total;
     return fail(
@@ -87,11 +89,17 @@ export function validateApprovalRequest(sheet: Pick<GoalSheet, 'status'>, goals:
 }
 
 export function getQuarterForDate(date: Date): Quarter | null {
-  const month = date.getMonth();
-  if (month === 6) return 'Q1';
-  if (month === 9) return 'Q2';
-  if (month === 0) return 'Q3';
-  if (month === 2 || month === 3) return 'Q4';
+  // Use cycle config instead of hardcoded months to avoid temporal coupling
+  for (const window of DEFAULT_CYCLE_WINDOWS) {
+    if (!window.quarter) continue;
+    const opens = new Date(window.opensAt);
+    const closes = new Date(window.closesAt);
+    // Normalize to UTC midnight for timezone-safe comparison
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const o = new Date(Date.UTC(opens.getFullYear(), opens.getMonth(), opens.getDate()));
+    const c = new Date(Date.UTC(closes.getFullYear(), closes.getMonth(), closes.getDate()));
+    if (d >= o && d <= c) return window.quarter;
+  }
   return null;
 }
 

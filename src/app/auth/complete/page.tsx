@@ -66,7 +66,7 @@ export default function AuthCompletePage() {
   }, [router, setExternalUser]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg-surface)]">
       <div style={{ textAlign: 'center' }}>
         <div
           style={{
@@ -74,14 +74,14 @@ export default function AuthCompletePage() {
             height: '42px',
             borderRadius: '12px',
             border: '1px solid #dbeafe',
-            background: '#eff6ff',
+            background: 'var(--brand-light)',
             margin: '0 auto 14px',
           }}
         />
-        <p style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>
+        <p style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 4px' }}>
           Completing Microsoft sign-in
         </p>
-        <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Preparing your Meridian session...</p>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>Preparing your Meridian session...</p>
       </div>
     </div>
   );

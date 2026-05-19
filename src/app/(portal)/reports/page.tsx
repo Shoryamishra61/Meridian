@@ -7,6 +7,7 @@
 
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/stores/auth-store';
 import { useDataStore } from '@/stores/data-store';
 import { useDemoDateStore } from '@/stores/demo-date-store';
 import { DEMO_ACCOUNTS, UOM_LABELS, type Quarter } from '@/lib/constants';
@@ -14,17 +15,43 @@ import { calculateProgressScore, formatScore, getScoreColor } from '@/lib/calcul
 import { cn } from '@/lib/utils';
 
 const QUARTERS: Quarter[] = ['Q1', 'Q2', 'Q3', 'Q4'];
-const TH: React.CSSProperties = { padding: '10px 16px', fontSize: '11px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left', whiteSpace: 'nowrap' };
-const TD: React.CSSProperties = { padding: '12px 16px', fontSize: '13px', color: '#475569' };
+const PAGE_SIZE = 50;
+const TH: React.CSSProperties = { padding: '10px 16px', fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left', whiteSpace: 'nowrap' };
+const TD: React.CSSProperties = { padding: '12px 16px', fontSize: '13px', color: 'var(--text-secondary)' };
+
+/** Prevent CSV injection (CWE-74): prefix dangerous chars with apostrophe */
+function sanitizeCSVCell(value: unknown): string {
+  const str = String(value ?? '');
+  // If cell starts with =, +, -, @, tab, or CR — prepend apostrophe to neutralize formula injection
+  if (/^[=+\-@\t\r]/.test(str)) return `'${str}`;
+  return str;
+}
 
 export default function ReportsPage() {
+  const user = useAuthStore((state) => state.user)!;
   const { goals, goalSheets, quarterlyUpdates, cycles, thrustAreas } = useDataStore();
   const getCurrentDate = useDemoDateStore((state) => state.getCurrentDate);
   const [selectedQuarter, setSelectedQuarter] = useState<Quarter>('Q1');
+  const [currentPage, setCurrentPage] = useState(0);
   const activeCycle = cycles.find((cycle) => cycle.isActive);
 
+  /**
+   * Scope employees by viewer role — critical to prevent cross-team data leak.
+   * Admin: all employees. Manager: direct reports only. Employee: self.
+   */
+  const scopedEmployees = useMemo(() => {
+    if (user.role === 'ADMIN') return DEMO_ACCOUNTS.filter((a) => a.role === 'EMPLOYEE');
+    if (user.role === 'MANAGER') return DEMO_ACCOUNTS.filter((a) => a.role === 'EMPLOYEE' && a.managerId === user.id);
+    return DEMO_ACCOUNTS.filter((a) => a.id === user.id);
+  }, [user.id, user.role]);
+
+  const scopeLabel =
+    user.role === 'ADMIN' ? 'Organization-wide' :
+    user.role === 'MANAGER' ? 'Your direct reports' :
+    'Your goals';
+
   const reportData = useMemo(() => {
-    return DEMO_ACCOUNTS.filter((account) => account.role === 'EMPLOYEE')
+    return scopedEmployees
       .flatMap((employee) => {
         const manager = DEMO_ACCOUNTS.find((account) => account.id === employee.managerId);
         const sheet = goalSheets.find(
@@ -48,6 +75,15 @@ export default function ReportsPage() {
                 })
               : null;
 
+          // Keep numeric and date fields distinct so Excel formats them
+          // correctly. Timeline goals fill the *_Date columns; numeric/
+          // percentage goals fill the *_Value columns.
+          const isTimeline = goal.uomType === 'TIMELINE';
+          const plannedDate = isTimeline && goal.targetDate ? new Date(goal.targetDate).toLocaleDateString('en-IN') : '';
+          const actualDate = isTimeline && update?.completionDate ? new Date(update.completionDate).toLocaleDateString('en-IN') : '';
+          const plannedValue = isTimeline ? '' : goal.target;
+          const actualValue = isTimeline ? '' : (update?.actualAchievement ?? '');
+
           return {
             employee: employee.name,
             manager: manager?.name || '-',
@@ -55,15 +91,14 @@ export default function ReportsPage() {
             thrustArea: thrustArea?.name || '-',
             goalTitle: goal.title,
             uom: UOM_LABELS[goal.uomType],
-            plannedTarget:
-              goal.uomType === 'TIMELINE' && goal.targetDate
-                ? new Date(goal.targetDate).toLocaleDateString('en-IN')
-                : goal.target,
+            plannedValue,
+            plannedDate,
+            actualValue,
+            actualDate,
+            // Backwards-compat display column used by the table view.
+            plannedDisplay: isTimeline ? plannedDate : goal.target,
+            actualDisplay: isTimeline ? (actualDate || '-') : (update?.actualAchievement ?? '-'),
             weightage: goal.weightage,
-            actualAchievement:
-              goal.uomType === 'TIMELINE' && update?.completionDate
-                ? new Date(update.completionDate).toLocaleDateString('en-IN')
-                : update?.actualAchievement ?? '-',
             progress: score != null ? formatScore(score) : '-',
             rawScore: score,
             quarter: selectedQuarter,
@@ -71,21 +106,45 @@ export default function ReportsPage() {
           };
         });
       });
-  }, [activeCycle?.id, goalSheets, goals, quarterlyUpdates, selectedQuarter, thrustAreas]);
+  }, [activeCycle?.id, goalSheets, goals, quarterlyUpdates, selectedQuarter, scopedEmployees, thrustAreas]);
+
+  // Stable column definition used by both CSV and Excel for parity.
+  const exportColumns: Array<{ header: string; accessor: (row: typeof reportData[number]) => string | number }> = [
+    { header: 'Employee', accessor: (r) => r.employee },
+    { header: 'Manager', accessor: (r) => r.manager },
+    { header: 'Department', accessor: (r) => r.department },
+    { header: 'Thrust Area', accessor: (r) => r.thrustArea },
+    { header: 'Goal Title', accessor: (r) => r.goalTitle },
+    { header: 'UoM', accessor: (r) => r.uom },
+    { header: 'Planned Value', accessor: (r) => r.plannedValue },
+    { header: 'Planned Deadline', accessor: (r) => r.plannedDate },
+    { header: 'Actual Value', accessor: (r) => r.actualValue },
+    { header: 'Completion Date', accessor: (r) => r.actualDate },
+    { header: 'Weightage (%)', accessor: (r) => r.weightage },
+    { header: 'Progress Score', accessor: (r) => r.progress },
+    { header: 'Quarter', accessor: (r) => r.quarter },
+    { header: 'Status', accessor: (r) => r.status },
+  ];
 
   const handleExportCSV = () => {
     if (reportData.length === 0) { toast.error('No data to export'); return; }
-    const headers = ['Employee', 'Manager', 'Department', 'Thrust Area', 'Goal Title', 'UoM', 'Planned Target', 'Weightage', 'Actual Achievement', 'Progress Score', 'Quarter', 'Status'];
+    const headers = exportColumns.map((c) => c.header);
     const rows = reportData.map((row) =>
-      [row.employee, row.manager, row.department, row.thrustArea, row.goalTitle, row.uom, row.plannedTarget, row.weightage, row.actualAchievement, row.progress, row.quarter, row.status]
-        .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+      exportColumns
+        .map((column) => `"${sanitizeCSVCell(column.accessor(row)).replace(/"/g, '""')}"`)
         .join(',')
     );
-    const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+    // Prepend UTF-8 BOM so Excel auto-detects Unicode characters correctly.
+    const csv = `\uFEFF${[headers.join(','), ...rows].join('\n')}`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    link.href = url;
     link.download = `Meridian_Achievement_Report_${selectedQuarter}_${getCurrentDate().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     toast.success('CSV report exported');
   };
 
@@ -94,7 +153,12 @@ export default function ReportsPage() {
     try {
       const XLSX = await import('xlsx');
       const workbook = XLSX.utils.book_new();
-      const worksheet = XLSX.utils.json_to_sheet(reportData);
+      const rows = reportData.map((row) => {
+        const record: Record<string, string | number> = {};
+        exportColumns.forEach((column) => { record[column.header] = column.accessor(row); });
+        return record;
+      });
+      const worksheet = XLSX.utils.json_to_sheet(rows, { header: exportColumns.map((c) => c.header) });
       XLSX.utils.book_append_sheet(workbook, worksheet, `${selectedQuarter} Achievement`);
       XLSX.writeFile(workbook, `Meridian_Achievement_Report_${selectedQuarter}.xlsx`);
       toast.success('Excel report exported');
@@ -109,32 +173,40 @@ export default function ReportsPage() {
     return (
       <span style={{
         display: 'inline-flex', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, lineHeight: 1.2,
-        background: isGood ? '#ecfdf5' : '#f8fafc',
-        color: isGood ? '#065f46' : '#64748b',
+        background: isGood ? 'color-mix(in srgb, var(--success) 14%, transparent)' : 'var(--bg-surface-hover)',
+        border: `1px solid ${isGood ? 'color-mix(in srgb, var(--success) 28%, transparent)' : 'var(--border)'}`,
+        color: isGood ? 'var(--success)' : 'var(--text-tertiary)',
       }}>{s}</span>
     );
   };
 
   return (
-    <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="animate-in app-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+      <header className="app-page-header">
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', margin: '0 0 4px 0' }}>Reports</h1>
-          <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>Planned vs Actual achievement report for {activeCycle?.name}</p>
+          <p className="app-page-eyebrow">Reports</p>
+          <h1 style={{ margin: '0 0 6px 0' }}>Performance Reports</h1>
+          <p className="app-page-meta">
+            <span>Planned vs Actual achievement report</span>
+            <span className="sep">·</span>
+            <span>{activeCycle?.name}</span>
+            <span className="sep">·</span>
+            <span>{scopeLabel}</span>
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={handleExportCSV} style={{ height: '36px', padding: '0 14px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontSize: '13px', fontWeight: 500, color: '#475569', cursor: 'pointer' }}>
+        <div className="app-page-actions">
+          <button onClick={handleExportCSV} className="btn-secondary btn-sm">
             Export CSV
           </button>
-          <button onClick={handleExportExcel} style={{ height: '36px', padding: '0 14px', borderRadius: '8px', border: 'none', background: '#2563eb', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
+          <button onClick={handleExportExcel} className="btn-primary btn-sm">
             Export Excel
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Quarter tabs */}
-      <div style={{ display: 'flex', gap: '4px', padding: '4px', background: '#f1f5f9', borderRadius: '10px', width: 'fit-content' }}>
+      <div style={{ display: 'flex', gap: '4px', padding: '4px', background: 'var(--bg-muted)', borderRadius: '10px', width: 'fit-content' }}>
         {QUARTERS.map((quarter) => (
           <button
             key={quarter}
@@ -150,11 +222,11 @@ export default function ReportsPage() {
       </div>
 
       {/* Data table */}
-      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden' }}>
         <div className="overflow-x-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+              <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-canvas)' }}>
                 <th style={TH}>Employee</th>
                 <th style={TH}>Manager</th>
                 <th style={TH}>Goal</th>
@@ -166,31 +238,50 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {reportData.length === 0 ? (
+              {(() => {
+                const pagedData = reportData.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+                return pagedData.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: '48px 20px', textAlign: 'center', fontSize: '14px', color: '#94a3b8' }}>
+                  <td colSpan={8} style={{ padding: '48px 20px', textAlign: 'center', fontSize: '14px', color: 'var(--text-tertiary)' }}>
                     No report rows yet. Create goals and submit check-ins to generate exports.
                   </td>
                 </tr>
               ) : (
-                reportData.map((row, index) => (
-                  <tr key={`${row.employee}-${row.goalTitle}-${index}`} style={{ borderBottom: index < reportData.length - 1 ? '1px solid #f1f5f9' : 'none' }} className="hover:bg-slate-50 transition-colors">
-                    <td style={{ ...TD, fontWeight: 500, color: '#0f172a' }}>{row.employee}</td>
+                <>
+                {pagedData.map((row, index) => (
+                  <tr key={`${row.employee}-${row.goalTitle}-${index}`} style={{ borderBottom: index < pagedData.length - 1 ? '1px solid var(--border)' : 'none' }} className="hover:bg-[var(--bg-surface-hover)] transition-colors">
+                    <td style={{ ...TD, fontWeight: 500, color: 'var(--text-primary)' }}>{row.employee}</td>
                     <td style={TD}>{row.manager}</td>
-                    <td style={{ ...TD, maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#0f172a' }} title={row.goalTitle}>{row.goalTitle}</td>
-                    <td style={{ ...TD, fontSize: '12px', color: '#64748b' }}>{row.uom.split('(')[0].trim()}</td>
-                    <td style={{ ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.plannedTarget}</td>
-                    <td style={{ ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.actualAchievement}</td>
+                    <td style={{ ...TD, maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }} title={row.goalTitle}>{row.goalTitle}</td>
+                    <td style={{ ...TD, fontSize: '12px', color: 'var(--text-secondary)' }}>{row.uom.split('(')[0].trim()}</td>
+                    <td style={{ ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.plannedDisplay}</td>
+                    <td style={{ ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.actualDisplay}</td>
                     <td className={cn(row.rawScore != null && getScoreColor(row.rawScore))} style={{ ...TD, textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                       {row.progress}
                     </td>
                     <td style={{ ...TD, textAlign: 'center' }}>{statusBadge(row.status)}</td>
                   </tr>
-                ))
-              )}
+                ))}
+                </>
+              );
+              })()}
             </tbody>
           </table>
         </div>
+        {/* Pagination */}
+        {reportData.length > PAGE_SIZE && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+              Showing {currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, reportData.length)} of {reportData.length}
+            </span>
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <button disabled={currentPage === 0} onClick={() => setCurrentPage((p) => p - 1)}
+                style={{ height: '32px', padding: '0 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-surface)', fontSize: '13px', color: currentPage === 0 ? '#cbd5e1' : '#475569', cursor: currentPage === 0 ? 'default' : 'pointer' }}>Prev</button>
+              <button disabled={(currentPage + 1) * PAGE_SIZE >= reportData.length} onClick={() => setCurrentPage((p) => p + 1)}
+                style={{ height: '32px', padding: '0 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-surface)', fontSize: '13px', color: (currentPage + 1) * PAGE_SIZE >= reportData.length ? '#cbd5e1' : '#475569', cursor: (currentPage + 1) * PAGE_SIZE >= reportData.length ? 'default' : 'pointer' }}>Next</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
