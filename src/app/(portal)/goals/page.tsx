@@ -310,7 +310,7 @@ function GoalsPage() {
                           <td>
                             <div className="goals-title-cell">
                               <div className="goals-title-row">
-                                {goal.isShared && !goal.isOwner && <Lock title="Shared goal - read-only" className="goals-lock h-3.5 w-3.5" />}
+                                {goal.isShared && !goal.isOwner && <span title="Shared goal - read-only"><Lock className="goals-lock h-3.5 w-3.5" /></span>}
                                 <p className="goals-title">{goal.title}</p>
                               </div>
                               <p className="goals-description">{goal.description || 'No description'}</p>
