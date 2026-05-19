@@ -29,7 +29,7 @@ Built with a **microservice-ready monolith** architecture, Meridian is designed 
 
 | | |
 |---|---|
-| **Portal URL** | _`[To be added after Vercel deployment]`_ |
+| **Portal URL** | [https://meridian-orcin-nu.vercel.app](https://meridian-orcin-nu.vercel.app) |
 | **GitHub Repository** | [github.com/Shoryamishra61/Meridian](https://github.com/Shoryamishra61/Meridian) |
 
 ### Demo Credentials

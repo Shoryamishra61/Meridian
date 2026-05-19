@@ -75,7 +75,7 @@
     linkcolor=brand,
     urlcolor=brand,
     pdftitle={Meridian — Enterprise Performance Management Platform},
-    pdfauthor={Team Meridian}
+    pdfauthor={Shoryakumar Mishra, Team Meridian}
 }
 
 % ── Header/Footer ────────────────────────────────────────────
@@ -141,14 +141,15 @@
 
 \begin{tcolorbox}[
     colback=white, colframe=border, arc=2pt, boxrule=0.6pt,
-    width=0.8\textwidth,
-    left=20pt, right=20pt, top=16pt, bottom=16pt
+    width=0.85\textwidth,
+    left=16pt, right=16pt, top=16pt, bottom=16pt
 ]
 \renewcommand{\arraystretch}{1.6}
 \begin{tabular}{@{}r@{\hspace{16pt}}l@{}}
 \textcolor{textsecondary}{\small SUBMISSION FOR} & \textbf{AtomQuest Hackathon 1.0} \\
+\textcolor{textsecondary}{\small AUTHOR} & \textbf{Shoryakumar Mishra} \\
 \textcolor{textsecondary}{\small REPOSITORY} & \href{https://github.com/Shoryamishra61/Meridian}{\texttt{github.com/Shoryamishra61/Meridian}} \\
-\textcolor{textsecondary}{\small LIVE DEMO} & \textit{[To be added after Vercel deployment]} \\
+\textcolor{textsecondary}{\small LIVE DEMO} & \href{https://meridian-orcin-nu.vercel.app}{\texttt{meridian-orcin-nu.vercel.app}} \\
 \textcolor{textsecondary}{\small DATE} & May 2026 \\
 \end{tabular}
 \end{tcolorbox}
@@ -212,7 +213,15 @@ Meridian follows a \textbf{layered monolith} architecture organized into five ti
 
 \vspace{12pt}
 
-\subsection{High-Level Architecture Diagram}
+\subsection{Portal Interface (Primary View)}
+
+\begin{center}
+\includegraphics[width=\textwidth]{screenshot.png}
+\end{center}
+
+\vspace{12pt}
+
+\subsection{Underlying Architecture Diagram (Secondary)}
 
 \begin{center}
 \begin{tikzpicture}[
